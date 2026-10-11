@@ -1,0 +1,77 @@
+name: octo-integration-lab
+
+x-environment: &environment
+  ConnectionStrings__Lab: Host=db;Database=integration_lab;Username=lab;Password=${LAB_DB_PASSWORD:-local-lab-password}
+  SigningSecret: ${LAB_SIGNING_SECRET:-local-lab-signing-secret-change-outside-demo}
+  ControlKey: ${LAB_CONTROL_KEY:-local-lab-control-key-change-outside-demo}
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: integration_lab
+      POSTGRES_USER: lab
+      POSTGRES_PASSWORD: ${LAB_DB_PASSWORD:-local-lab-password}
+    volumes:
+      - lab-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U lab -d integration_lab"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  partner:
+    build:
+      context: .
+      target: partner
+    environment: *environment
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, http://localhost:8080/health]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  lab:
+    build:
+      context: .
+      target: lab
+    ports:
+      - "127.0.0.1:${LAB_PORT:-5188}:8080"
+    environment:
+      <<: *environment
+      PartnerUrl: http://partner:8080
+      MaxAttempts: 4
+      RetryBaseSeconds: 2
+      TimeoutSeconds: 2
+      LeaseSeconds: 15
+    depends_on:
+      db:
+        condition: service_healthy
+      partner:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, http://localhost:8080/health]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  tests:
+    profiles: [test]
+    build:
+      context: .
+      target: tests
+    environment:
+      <<: *environment
+      LAB_BASE_URL: http://lab:8080
+      PARTNER_BASE_URL: http://partner:8080
+    depends_on:
+      lab:
+        condition: service_healthy
+      partner:
+        condition: service_healthy
+
+volumes:
+  lab-data:

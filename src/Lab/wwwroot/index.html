@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="An interactive .NET lab for durable webhooks, retries, and failure recovery. Built by Octo."
+    />
+    <title>Integration Lab · Octo</title>
+    <link rel="icon" type="image/svg+xml" href="/mark.svg" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" type="module"></script>
+  </head>
+  <body>
+    <a class="skip" href="#workspace">Skip to lab</a>
+    <header class="masthead">
+      <a class="brand" href="/" aria-label="Octo Integration Lab home"
+        ><img src="/mark.svg" alt="" width="34" height="34" /><span
+          >octo<span class="brand-divider">/</span
+          ><span class="brand-section">integration lab</span></span
+        ></a
+      >
+      <div class="header-right">
+        <span class="environment"><span class="dot"></span>LOCAL SANDBOX</span
+        ><a
+          href="https://github.com/OctoHoldingsLLC/octo-integration-lab"
+          target="_blank"
+          rel="noreferrer"
+          >View source <span aria-hidden="true">↗</span></a
+        >
+      </div>
+    </header>
+    <main>
+      <section class="intro" aria-labelledby="title">
+        <div>
+          <p class="eyebrow">EXPERIMENT 001 / RELIABLE DELIVERY</p>
+          <h1 id="title">
+            Break the connection.<br /><span>Keep the promise.</span>
+          </h1>
+          <p class="intro-copy">
+            An order is easy to send. Making sure it arrives is the interesting
+            part.<br class="desktop-break" />
+            Change the conditions. Follow the event. See how recovery works.
+          </p>
+        </div>
+        <aside class="intro-note">
+          <span class="note-number">01—05</span>
+          <p>Five partner behaviors.<br />One durable workflow.</p>
+          <span class="mono">.NET · PostgreSQL · HMAC</span>
+        </aside>
+      </section>
+      <section class="pipeline" aria-label="Integration architecture">
+        <div class="pipeline-node">
+          <span class="step">01</span>
+          <div>
+            <strong>Order API</strong><span>Save order + event together</span>
+          </div>
+          <span class="node-tag">ATOMIC</span>
+        </div>
+        <span class="pipeline-arrow" aria-hidden="true">→</span>
+        <div class="pipeline-node">
+          <span class="step">02</span>
+          <div>
+            <strong>Durable outbox</strong><span>Sign · deliver · retry</span>
+          </div>
+          <span class="node-tag">PERSISTED</span>
+        </div>
+        <span class="pipeline-arrow" aria-hidden="true">→</span>
+        <div class="pipeline-node">
+          <span class="step">03</span>
+          <div>
+            <strong>Partner inbox</strong><span>Verify + process once</span>
+          </div>
+          <span class="node-tag">DEDUPED</span>
+        </div>
+      </section>
+      <div
+        id="connection-error"
+        class="banner error"
+        role="status"
+        hidden
+      ></div>
+      <div
+        id="notice"
+        class="banner"
+        role="status"
+        aria-live="polite"
+        hidden
+      ></div>
+      <div class="workspace" id="workspace">
+        <aside class="controls" aria-label="Experiment controls">
+          <section class="panel control-panel">
+            <div class="panel-heading">
+              <h2>Control room</h2>
+              <span class="small-label">LIVE</span>
+            </div>
+            <fieldset id="partner-controls" disabled>
+              <legend>Partner behavior</legend>
+              <label class="mode"
+                ><input type="radio" name="mode" value="healthy" checked /><span
+                  ><strong>Healthy</strong
+                  ><small>Accept and acknowledge.</small></span
+                ><span class="mode-indicator good"></span
+              ></label>
+              <label class="mode"
+                ><input type="radio" name="mode" value="reject" /><span
+                  ><strong>Service unavailable</strong
+                  ><small>Return HTTP 503.</small></span
+                ><span class="mode-indicator bad"></span
+              ></label>
+              <label class="mode"
+                ><input type="radio" name="mode" value="slow" /><span
+                  ><strong>Slow response</strong
+                  ><small>Wait 5s before processing.</small></span
+                ><span class="mode-indicator warm"></span
+              ></label>
+              <label class="mode"
+                ><input type="radio" name="mode" value="offline" /><span
+                  ><strong>Connection drop</strong
+                  ><small>Close without a response.</small></span
+                ><span class="mode-indicator bad"></span
+              ></label>
+              <label class="mode"
+                ><input type="radio" name="mode" value="lost-ack" /><span
+                  ><strong>Lost acknowledgement</strong
+                  ><small>Process, then delay the reply.</small></span
+                ><span class="mode-indicator warm"></span
+              ></label>
+            </fieldset>
+            <div class="worker-control">
+              <div>
+                <strong>Delivery worker</strong
+                ><span id="worker-label">Connecting…</span>
+              </div>
+              <button
+                type="button"
+                id="pause-worker"
+                class="button secondary small"
+                disabled
+              >
+                Pause
+              </button>
+            </div>
+            <p class="control-footnote" id="delivery-policy">
+              Loading delivery settings…
+            </p>
+          </section>
+          <section class="panel order-panel">
+            <p class="eyebrow">START SOMETHING</p>
+            <h2>Send an order</h2>
+            <p class="muted">Fictional data. Real delivery behavior.</p>
+            <form id="order-form">
+              <label for="reference">Order reference</label
+              ><input
+                id="reference"
+                name="reference"
+                maxlength="80"
+                required
+                value="DEMO-1001"
+                autocomplete="off"
+              />
+              <div class="form-row">
+                <div>
+                  <label for="sku">Product</label
+                  ><select id="sku" name="sku">
+                    <option value="LAMP-01">Studio lamp</option>
+                    <option value="DESK-02">Standing desk</option>
+                    <option value="KIT-03">Desk kit</option>
+                  </select>
+                </div>
+                <div class="quantity">
+                  <label for="quantity">Qty</label
+                  ><input
+                    id="quantity"
+                    name="quantity"
+                    type="number"
+                    min="1"
+                    max="100"
+                    value="1"
+                    required
+                  />
+                </div>
+              </div>
+              <button
+                type="submit"
+                class="button primary"
+                id="send-order"
+                disabled
+              >
+                Create order <span aria-hidden="true">↗</span>
+              </button>
+            </form>
+            <button
+              type="button"
+              id="repeat-order"
+              class="text-button"
+              disabled
+            >
+              ↻ Repeat last request <span class="small-label">SAME KEY</span>
+            </button>
+          </section>
+          <p class="sandbox-note">
+            This lab runs on your machine. Orders are fictional, and data stays
+            in your local Docker volume.
+          </p>
+        </aside>
+        <div class="results">
+          <div class="metrics" aria-label="Delivery totals">
+            <div><span>Total orders</span><strong id="total">—</strong></div>
+            <div><span>Delivered</span><strong id="delivered">—</strong></div>
+            <div><span>In progress</span><strong id="queued">—</strong></div>
+            <div><span>Exhausted</span><strong id="exhausted">—</strong></div>
+          </div>
+          <section class="panel feed-panel" aria-labelledby="feed-title">
+            <div class="panel-heading">
+              <div>
+                <h2 id="feed-title">Delivery feed</h2>
+                <p class="muted">
+                  Every event has a story. Open one to follow it.
+                </p>
+              </div>
+              <span id="sync-label" class="sync-label"
+                ><span class="dot"></span>Connecting</span
+              >
+            </div>
+            <div id="empty" class="empty">
+              <span class="empty-glyph" aria-hidden="true">↗</span>
+              <h3>Ready when you are.</h3>
+              <p>
+                Create an order, or start a guided experiment below.<br />Your
+                events and their delivery attempts will appear here.
+              </p>
+            </div>
+            <div
+              class="table-wrap"
+              id="delivery-table"
+              role="region"
+              aria-label="Delivery events; scroll horizontally on small screens"
+              tabindex="0"
+              hidden
+            >
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Order / event</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Attempts</th>
+                    <th scope="col">Activity</th>
+                    <th scope="col"><span class="sr-only">Details</span></th>
+                  </tr>
+                </thead>
+                <tbody id="deliveries"></tbody>
+              </table>
+            </div>
+            <div class="feed-footer">
+              <span>Showing the latest 100 events</span
+              ><span>At-least-once delivery</span>
+            </div>
+          </section>
+          <section
+            class="panel detail-panel"
+            id="event-detail"
+            aria-labelledby="detail-title"
+            hidden
+          >
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">UNDER THE HOOD</p>
+                <h2 id="detail-title">Event timeline</h2>
+              </div>
+              <button
+                type="button"
+                class="button secondary small"
+                id="replay-event"
+                disabled
+              >
+                Replay event ↻
+              </button>
+            </div>
+            <p class="event-meta mono" id="event-meta"></p>
+            <ol class="timeline" id="timeline"></ol>
+            <details id="payload-disclosure">
+              <summary>
+                Inspect the signed event payload
+                <span aria-hidden="true">+</span>
+              </summary>
+              <pre id="event-payload"></pre>
+              <p class="payload-note">
+                The same event ID and exact payload bytes are reused on every
+                retry. Each attempt receives a fresh timestamp and signature.
+              </p>
+            </details>
+          </section>
+          <section class="experiments" aria-labelledby="experiments-title">
+            <div class="section-label">
+              <h2 id="experiments-title">Make it interesting</h2>
+              <span>GUIDED EXPERIMENTS</span>
+            </div>
+            <div class="experiment-grid">
+              <button
+                class="experiment"
+                type="button"
+                data-experiment="reject"
+                disabled
+              >
+                <span class="experiment-number">01 / RETRY & RECOVER</span
+                ><strong>Let it fail. Then fix it.</strong
+                ><span
+                  >Send into a 503. Switch to Healthy and watch the next retry
+                  land.</span
+                ><span class="experiment-link">Start experiment ↗</span>
+              </button>
+              <button
+                class="experiment"
+                type="button"
+                data-experiment="lost-ack"
+                disabled
+              >
+                <span class="experiment-number">02 / THE AMBIGUOUS SUCCESS</span
+                ><strong>The reply never arrived.</strong
+                ><span
+                  >Process an order, lose the reply, and watch deduplication
+                  protect it.</span
+                ><span class="experiment-link">Start experiment ↗</span>
+              </button>
+              <button
+                class="experiment"
+                type="button"
+                data-experiment="pause"
+                disabled
+              >
+                <span class="experiment-number">03 / DURABLE BY DESIGN</span
+                ><strong>Put delivery on hold.</strong
+                ><span
+                  >Pause the worker and queue an order. Resume when you're
+                  ready.</span
+                ><span class="experiment-link">Start experiment ↗</span>
+              </button>
+            </div>
+          </section>
+          <section class="receiver-strip" aria-label="Partner results">
+            <div>
+              <span class="receiver-icon" aria-hidden="true">◎</span>
+              <div>
+                <strong>On the other side</strong
+                ><span>Durable receipts at the partner</span>
+              </div>
+            </div>
+            <dl>
+              <div>
+                <dt>Orders processed</dt>
+                <dd id="processed">—</dd>
+              </div>
+              <div>
+                <dt>Duplicates caught</dt>
+                <dd id="duplicates">—</dd>
+              </div>
+            </dl>
+          </section>
+        </div>
+      </div>
+    </main>
+    <footer>
+      <span
+        >BUILT BY OCTO <span class="footer-divider">/</span> ENGINEERING YOU CAN
+        INSPECT.</span
+      ><a
+        href="https://github.com/OctoHoldingsLLC/octo-integration-lab/blob/main/docs/architecture.md"
+        target="_blank"
+        rel="noreferrer"
+        >Read the architecture ↗</a
+      >
+    </footer>
+    <noscript
+      ><p class="banner error">
+        Enable JavaScript to use the dashboard. The HTTP API and Docker
+        experiments are documented in the repository.
+      </p></noscript
+    >
+  </body>
+</html>

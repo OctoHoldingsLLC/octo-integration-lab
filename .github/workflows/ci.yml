@@ -1,0 +1,34 @@
+name: Verify lab
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lab-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build and start the lab
+        run: docker compose --profile test up -d --build --wait db partner lab
+      - name: Unit and real PostgreSQL / HTTP integration tests
+        run: docker compose --profile test run --no-deps --build --rm tests
+      - name: Verify container restart and crash recovery
+        shell: pwsh
+        run: ./scripts/verify-recovery.ps1
+      - name: Service logs
+        if: failure()
+        run: docker compose logs --no-color --tail 150
+      - name: Stop containers
+        if: always()
+        run: docker compose --profile test down --volumes
