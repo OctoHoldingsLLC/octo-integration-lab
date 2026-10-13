@@ -71,12 +71,48 @@ public sealed class ExperimentTests(LabFixture fixture) : IClassFixture<LabFixtu
             Assert.All(run.Receivers["primary"]!, e => Assert.False(e.Received));
         }
         if (scenario is "fail-twice" or "rate-limit") Assert.Equal(3, Assert.Single(run.Deliveries).Attempts);
+        if (scenario == "burst")
+        {
+            var metrics = (await fixture.Lab.GetFromJsonAsync<QueueMetrics>($"/api/metrics?runId={run.Run.Id}"))!;
+            Assert.Equal(0, metrics.Queued);
+            Assert.Equal(0, metrics.InFlight);
+            Assert.Equal(12, metrics.CompletedLastMinute);
+            Assert.True(metrics.AverageDeliverySeconds > 0);
+        }
+        if (scenario == "fail-twice")
+        {
+            var traced = (await fixture.Lab.GetFromJsonAsync<DeliveryDetail>($"/api/deliveries/{created.DeliveryIds[0]}"))!;
+            var trace = Assert.Single(traced.Attempts.Select(a => a.TraceId).Distinct());
+            Assert.Matches("^[a-f0-9]{32}$", trace!);
+            Assert.All(traced.Receiver!.Observations, observation => Assert.Equal(trace, observation.TraceId));
+        }
         if (scenario == "rate-limit")
         {
             var detail = (await fixture.Lab.GetFromJsonAsync<DeliveryDetail>($"/api/deliveries/{created.DeliveryIds[0]}"))!;
             Assert.True((detail.Attempts[1].StartedAt - detail.Attempts[0].CompletedAt!.Value).TotalSeconds >= 3);
             Assert.True((detail.Attempts[2].StartedAt - detail.Attempts[1].CompletedAt!.Value).TotalSeconds >= 4);
         }
+    }
+
+    [Fact]
+    public async Task MaximumBurstDrainsWithBoundedConcurrentWorkers()
+    {
+        var created = await CreateAsync("burst", 50);
+        long peak = 0;
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        QueueMetrics? metrics;
+        do
+        {
+            metrics = await fixture.Lab.GetFromJsonAsync<QueueMetrics>($"/api/metrics?runId={created.Id}");
+            peak = Math.Max(peak, metrics!.InFlight);
+            Assert.InRange(metrics.InFlight, 0, 3);
+            if (metrics.CompletedLastMinute == 50) break;
+            await Task.Delay(75);
+        } while (DateTime.UtcNow < deadline);
+        Assert.Equal(50, metrics!.CompletedLastMinute);
+        Assert.InRange(peak, 2, 3);
+        Assert.Equal(0, metrics.CurrentCycleRetries);
+        Assert.True((await WaitAsync(created.Id)).Complete);
     }
 
     [Fact]
@@ -88,7 +124,7 @@ public sealed class ExperimentTests(LabFixture fixture) : IClassFixture<LabFixtu
         Assert.Single(copies, c => !c.Reused);
         var paused = copies[0];
         var failing = await CreateAsync("reject");
-        await WaitAsync(failing.Id, run => run.Deliveries.Any(d => d.Attempts >= 1));
+        await WaitAsync(failing.Id, run => run.Steps[1].Complete);
         using var recover = await fixture.Lab.PostAsJsonAsync($"/api/runs/{failing.Id}/recover", new { });
         recover.EnsureSuccessStatusCode();
         await WaitAsync(failing.Id);

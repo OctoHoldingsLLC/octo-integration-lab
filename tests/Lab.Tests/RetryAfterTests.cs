@@ -9,6 +9,8 @@ public sealed class RetryAfterTests
     [InlineData("5", 5)]
     [InlineData("0", 0)]
     [InlineData("99999", 60)]
+    [InlineData("9999999999999999999999999999", 60)]
+    [InlineData(" 5 ", 5)]
     public void NumericWaitsAreBounded(string value, int expected) =>
         Assert.Equal(TimeSpan.FromSeconds(expected), RetryAfter.Parse(value, DateTimeOffset.UtcNow).Delay);
 
@@ -28,5 +30,14 @@ public sealed class RetryAfterTests
         Assert.Equal(TimeSpan.Zero, past.Delay);
         Assert.Equal(TimeSpan.FromSeconds(4), RetryAfter.Apply(new("Retrying", TimeSpan.FromSeconds(4)), past).RetryAfter);
         Assert.Null(RetryAfter.Apply(new("Exhausted", null), new(TimeSpan.FromSeconds(60), "")).RetryAfter);
+    }
+
+    [Theory]
+    [InlineData("Sunday, 06-Nov-94 08:49:37 GMT")]
+    [InlineData("Sun Nov  6 08:49:37 1994")]
+    public void ObsoleteHttpDatesRemainAccepted(string value)
+    {
+        var now = new DateTimeOffset(1994, 11, 6, 8, 49, 30, TimeSpan.Zero);
+        Assert.Equal(TimeSpan.FromSeconds(7), RetryAfter.Parse(value, now).Delay);
     }
 }

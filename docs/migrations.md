@@ -6,4 +6,6 @@ The original `schema.sql` files are immutable baselines. Existing first-release 
 
 Add schema changes as sequential files in the owning service's `Migrations` folder, for example `002_experiments.sql`. They are embedded and applied in ordinal filename order. Never change an applied migration. Add a correcting migration instead. Failed migrations roll back together with the ledger entries.
 
+The expansion migrations split immutable events from per-destination deliveries, add experiment runs and durable circuit state, and add optional event trace context and attempt correlation IDs. Partner migrations add version-protected order state and receiver observations. Partner B uses its own `partner_secondary` schema and migration ledger in the local database. A global advisory lock protects initial ledger creation during simultaneous host startup.
+
 Back up the volume before upgrading a valuable local dataset. Rollbacks mean restoring that backup with the previous application version; automatic down migrations are intentionally not provided. A destructive demo reset remains an explicit `docker compose down --volumes` action.

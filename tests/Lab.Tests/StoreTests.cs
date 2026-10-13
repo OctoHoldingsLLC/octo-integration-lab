@@ -153,6 +153,43 @@ public sealed class StoreTests(LabFixture fixture) : IClassFixture<LabFixture>, 
     }
 
     [Fact]
+    public async Task QueueMetricsTrackAgeScopeRetriesCompletionsAndReplay()
+    {
+        var run = await store.CreateRunAsync(Guid.NewGuid().ToString(), new("burst", 3), default);
+        await store.CreateOrderAsync(Guid.NewGuid().ToString(), new("Outside run", "KIT-03", 1), default);
+        await using (var age = source.CreateCommand("UPDATE lab_deliveries SET created_at=clock_timestamp()-interval '10 seconds'"))
+            await age.ExecuteNonQueryAsync();
+        var queued = await store.MetricsAsync(run.Id, default);
+        Assert.Equal(3, queued.Queued);
+        Assert.Equal(0, queued.InFlight);
+        Assert.True(queued.OldestQueuedSeconds >= 10);
+        Assert.Null(queued.AverageDeliverySeconds);
+        Assert.Equal(4, (await store.MetricsAsync(null, default)).Queued);
+        var claim = (await store.ClaimAsync(15, default))!;
+        Assert.Equal(run.Id, claim.RunId);
+        Assert.Equal(1, (await store.MetricsAsync(run.Id, default)).InFlight);
+        await store.CompleteAsync(claim, new("Retrying", TimeSpan.Zero), "Failed", 503, 1, "Retry", default);
+        // Complete the other queued deliveries so this claim can retry in FIFO order.
+        for (var i = 0; i < 3; i++)
+        {
+            var other = (await store.ClaimAsync(15, default))!;
+            await store.CompleteAsync(other, new("Delivered", null), "Accepted", 200, 1, "Done", default);
+        }
+        var retry = (await store.ClaimAsync(15, default))!;
+        Assert.Equal(claim.Id, retry.Id);
+        await store.CompleteAsync(retry, new("Delivered", null), "Accepted", 200, 1, "Done", default);
+        var drained = await store.MetricsAsync(run.Id, default);
+        Assert.Equal(0, drained.Queued);
+        Assert.Null(drained.OldestQueuedSeconds);
+        Assert.Equal(1, drained.CurrentCycleRetries);
+        Assert.Equal(3, drained.CompletedLastMinute);
+        Assert.True(drained.AverageDeliverySeconds >= 10);
+        Assert.True(drained.P95DeliverySeconds >= drained.AverageDeliverySeconds);
+        await store.ReplayAsync(claim.Id, default);
+        Assert.Equal(0, (await store.MetricsAsync(run.Id, default)).CurrentCycleRetries);
+    }
+
+    [Fact]
     public async Task StaleWorkerCannotOverwriteRecoveredClaim()
     {
         var order = await store.CreateOrderAsync(Guid.NewGuid().ToString(), new("Fencing test", "LAMP-01", 1), default);
@@ -162,12 +199,16 @@ public sealed class StoreTests(LabFixture fixture) : IClassFixture<LabFixture>, 
         await store.RecoverExpiredAsync(4, default);
         var newClaim = (await store.ClaimAsync(15, default))!;
         Assert.NotEqual(oldClaim.Token, newClaim.Token);
+        await store.RecordTraceAsync(newClaim, "current-trace", default);
+        await store.RecordTraceAsync(oldClaim, "stale-trace", default);
         await store.CompleteAsync(oldClaim, new("Delivered", null), "Accepted", 200, 1, "stale result", default);
         Assert.Equal("Delivering", (await store.StateAsync(default)).Deliveries.Single().Status);
         await store.CompleteAsync(newClaim, new("Delivered", null), "Accepted", 200, 1, "current result", default);
         var detail = (await store.DetailAsync(order.EventId, default))!;
         Assert.Equal("Interrupted", detail.Attempts[0].Outcome);
         Assert.Equal("current result", detail.Attempts[1].Detail);
+        Assert.Equal("current-trace", detail.Attempts[1].TraceId);
+        Assert.Null(detail.Attempts[0].TraceId);
     }
 
     [Fact]

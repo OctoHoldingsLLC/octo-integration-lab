@@ -53,6 +53,25 @@ public sealed class SignatureTests(LabFixture fixture) : IClassFixture<LabFixtur
     }
 
     [Fact]
+    public async Task FirstReleasePayloadWithoutVersionCanStillBeDeliveredAndReplayed()
+    {
+        await fixture.ConfigureAsync("healthy");
+        var id = Guid.NewGuid();
+        var body = Body(id).Replace(",\"version\":1", "", StringComparison.Ordinal)
+            .Replace(",\"runId\":null,\"scenario\":null", "", StringComparison.Ordinal);
+        Assert.DoesNotContain("version", body);
+        for (var i = 0; i < 2; i++)
+        {
+            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+            using var request = Signed(body, id, timestamp, WebhookSignature.Sign(fixture.Secret, timestamp, id.ToString(), body));
+            using var response = await fixture.Partner.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+            Assert.Equal(i == 1, (await response.Content.ReadFromJsonAsync<ReceiptResult>())!.Duplicate);
+        }
+        Assert.Equal(1, await fixture.CountAsync("SELECT count(*) FROM partner_orders WHERE event_id=$1 AND version=1", id));
+    }
+
+    [Fact]
     public async Task PartnerControlRequiresItsSeparateKey()
     {
         using var response = await fixture.Partner.PostAsJsonAsync("/api/control", new PartnerControl("offline"));

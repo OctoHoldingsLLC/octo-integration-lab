@@ -1,0 +1,18 @@
+# Optional local trace viewer. Trace ingestion stays on the Compose network.
+services:
+  jaeger:
+    image: cr.jaegertracing.io/jaegertracing/jaeger:2.22.0
+    ports:
+      - "127.0.0.1:${TRACE_PORT:-16686}:16686"
+  lab:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    depends_on:
+      jaeger:
+        condition: service_started
+  partner:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+  partner-secondary:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317

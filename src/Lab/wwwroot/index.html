@@ -130,7 +130,7 @@
             </fieldset>
             <div class="worker-control">
               <div>
-                <strong>Delivery worker</strong
+                <strong>Delivery worker · all runs</strong
                 ><span id="worker-label">Connecting…</span>
               </div>
               <button
@@ -220,12 +220,26 @@
               <button class="button secondary" id="clear-run" type="button">Show all deliveries</button>
             </div>
           </section>
-          <div class="metrics" aria-label="Delivery totals">
+          <p class="muted">Workspace totals · all runs and manual orders</p>
+          <div class="metrics" aria-label="Global delivery totals">
             <div><span>Total orders</span><strong id="total">—</strong></div>
             <div><span>Delivered</span><strong id="delivered">—</strong></div>
             <div><span>In progress</span><strong id="queued">—</strong></div>
             <div><span>Exhausted</span><strong id="exhausted">—</strong></div>
           </div>
+          <section class="panel queue-panel" aria-labelledby="queue-title">
+            <div class="panel-heading"><h2 id="queue-title">Queue health</h2><span id="metrics-scope" class="muted">All runs and manual orders</span></div>
+            <dl class="queue-metrics">
+              <div><dt>Waiting</dt><dd id="queue-waiting">—</dd></div>
+              <div><dt>In flight</dt><dd id="queue-active">—</dd></div>
+              <div><dt>Oldest queued</dt><dd id="queue-age">—</dd></div>
+              <div><dt>Average delivery</dt><dd id="delivery-duration">—</dd></div>
+              <div><dt>95th percentile</dt><dd id="delivery-p95">—</dd></div>
+              <div><dt>Retries this cycle</dt><dd id="delivery-retries">—</dd></div>
+              <div><dt>Completed / last 60s</dt><dd id="delivery-throughput">—</dd></div>
+            </dl>
+            <p class="muted">Metrics follow the experiment run filter. Delivery times include all waiting and replay time since creation. Retries count attempts beyond the first in each delivery’s current cycle.</p>
+          </section>
           <section class="panel feed-panel" aria-labelledby="feed-title">
             <div class="panel-heading">
               <div>
@@ -308,6 +322,7 @@
             <p class="event-meta mono" id="event-meta"></p>
             <button type="button" class="text-button" id="copy-event-link">Copy event link</button>
             <p id="receiver-evidence" class="event-meta"></p>
+            <p id="trace-evidence" class="event-meta mono"></p>
             <ol class="timeline" id="timeline"></ol>
             <details id="payload-disclosure">
               <summary>
@@ -338,8 +353,8 @@
             <div>
               <span class="receiver-icon" aria-hidden="true">◎</span>
               <div>
-                <strong>On the other side</strong
-                ><span>Durable receipts at the partner</span>
+                <strong>Partner A · all runs</strong
+                ><span>Durable receipts across this receiver</span>
               </div>
             </div>
             <dl>

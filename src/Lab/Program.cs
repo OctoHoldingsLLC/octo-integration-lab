@@ -1,11 +1,13 @@
 using Npgsql;
 using Octo.IntegrationLab;
 using Octo.IntegrationLab.Lab;
+using Octo.IntegrationLab.Telemetry;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration["AllowedHosts"] ??= "localhost;127.0.0.1;lab";
 builder.WebHost.ConfigureKestrel(server => server.Limits.MaxRequestBodySize = 16 * 1024);
 var options = LabOptions.Read(builder.Configuration);
+builder.Services.AddLabTelemetry(builder.Configuration, "octo-lab");
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(options.ConnectionString));
 builder.Services.AddSingleton<LabStore>();
@@ -59,6 +61,7 @@ app.MapGet("/health", async (NpgsqlDataSource data, CancellationToken token) =>
 app.MapGet("/api/state", (LabStore store, CancellationToken token, string? search, string? status, int? page, int? pageSize, Guid? runId) =>
     store.StateAsync(token, (search ?? "")[..Math.Min(search?.Length ?? 0, 128)], status ?? "", page ?? 1, pageSize ?? 100, runId));
 app.MapGet("/api/config", () => new { options.MaxAttempts, options.RetryBaseSeconds, options.TimeoutSeconds, options.LeaseSeconds });
+app.MapGet("/api/metrics", (LabStore store, CancellationToken token, Guid? runId) => store.MetricsAsync(runId, token));
 app.MapGet("/api/deliveries/{id:guid}", async (Guid id, LabStore store, PartnerClient partner, CancellationToken token) =>
 {
     if (await store.DetailAsync(id, token) is not { } detail) return Results.NotFound(new { error = "Event not found." });

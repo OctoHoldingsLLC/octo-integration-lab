@@ -15,6 +15,8 @@ for (const scenario of ["reject", "lost-ack", "pause", "fail-twice", "rate-limit
     expect(new URL(page.url()).searchParams.get("run")).toBeTruthy();
     if (scenario === "pause") {
       await expect(page.locator("#run-status")).toHaveText("Run paused");
+      await expect(page.locator("#queue-waiting")).toHaveText("1");
+      await expect(page.locator("#queue-age")).not.toHaveText("—");
       await page.getByRole("button", { name: "Resume this run" }).click();
     }
     if (scenario === "reject") {
@@ -28,6 +30,10 @@ for (const scenario of ["reject", "lost-ack", "pause", "fail-twice", "rate-limit
     await expect(page.locator("#run-status")).toHaveText("Experiment complete", { timeout: 45000 });
     await expect(page.locator("#run-steps li.complete")).toHaveCount(3);
     await expect(page.locator("#timeline")).toContainText("Receiver ·");
+    await expect(page.locator("#trace-evidence")).toContainText("TRACE");
+    await expect(page.locator("#metrics-scope")).toContainText("Selected run");
+    await expect(page.locator("#queue-waiting")).toHaveText("0");
+    if (scenario === "burst") await expect(page.locator("#delivery-throughput")).toHaveText("10");
     if (scenario === "lost-ack") {
       await expect(page.locator("#timeline")).toContainText("Receiver · Committed");
       await expect(page.locator("#timeline")).toContainText("Timeout");
@@ -46,6 +52,26 @@ for (const scenario of ["reject", "lost-ack", "pause", "fail-twice", "rate-limit
     expect(page.url()).toBe(url);
   });
 }
+
+test("a lost experiment response reuses its persisted request after reload", async ({ page }) => {
+  await page.goto("/");
+  let committed;
+  await page.route("**/api/runs", async route => {
+    if (route.request().method() !== "POST") return route.continue();
+    const response = await route.fetch();
+    committed = await response.json();
+    await route.abort("failed");
+    await page.unroute("**/api/runs");
+  });
+  await page.locator('[data-scenario="pause"]').click();
+  await expect(page.locator("#notice")).toHaveClass(/error/);
+  await page.reload();
+  await page.locator('[data-scenario="pause"]').click();
+  await expect(page.locator("#notice")).toContainText("Restored the same experiment run");
+  expect(new URL(page.url()).searchParams.get("run")).toBe(committed.id);
+  await page.getByRole("button", { name: "Resume this run" }).click();
+  await expect(page.locator("#run-status")).toHaveText("Experiment complete");
+});
 
 test("invalid burst is explained without starting a run", async ({ page }) => {
   await page.goto("/");

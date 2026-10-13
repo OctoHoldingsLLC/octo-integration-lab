@@ -1179,3 +1179,14 @@ footer a {
     box-shadow: 0 0 0 3px #146c5a0b;
   }
 }
+
+.queue-panel { margin-bottom: 20px; }
+.queue-panel .panel-heading { flex-wrap: wrap; padding-bottom: 4px; }
+.queue-panel > p { margin: 16px 24px 20px; font-size: 12px; line-height: 1.6; }
+.queue-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; margin: 20px 24px; }
+.queue-metrics dt { color: var(--muted); font-size: 12px; }
+.queue-metrics dd { margin: 6px 0 0; font-size: 24px; font-weight: 600; }
+@media (max-width: 700px) {
+  .queue-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-inline: 16px; }
+  .queue-panel > p { margin-inline: 16px; }
+}

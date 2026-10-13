@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using Octo.IntegrationLab.Telemetry;
 
 namespace Octo.IntegrationLab.Lab;
 
@@ -38,6 +39,14 @@ public sealed class DeliveryWorker(LabStore store, LabOptions options, IHttpClie
 
     private async Task DispatchAsync(DeliveryClaim claim, CancellationToken stoppingToken)
     {
+        ActivityContext.TryParse(claim.TraceParent, claim.TraceState, out var parent);
+        using var activity = LabTelemetry.Source.StartActivity("deliver order", ActivityKind.Consumer, parent);
+        activity?.SetTag("messaging.message.id", claim.EventId.ToString());
+        activity?.SetTag("lab.delivery.id", claim.Id.ToString());
+        activity?.SetTag("lab.destination", claim.Destination);
+        activity?.SetTag("lab.attempt", claim.Attempt);
+        activity?.SetTag("lab.run.id", claim.RunId?.ToString());
+        if (activity is not null) await store.RecordTraceAsync(claim, activity.TraceId.ToString(), stoppingToken);
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture);
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(options.DestinationUrl(claim.Destination), "webhooks/orders"));
         request.Headers.Add(WebhookSignature.IdHeader, claim.EventId.ToString());
@@ -93,6 +102,9 @@ public sealed class DeliveryWorker(LabStore store, LabOptions options, IHttpClie
         var decision = DeliveryPolicy.Decide(success, status, claim.CycleAttempt, options.MaxAttempts,
             options.RetryBaseSeconds, Random.Shared.NextDouble() * 0.25);
         decision = RetryAfter.Apply(decision, receiverWait);
+        activity?.SetTag("lab.outcome", outcome);
+        activity?.SetTag("http.response.status_code", status);
+        if (!success) activity?.SetStatus(ActivityStatusCode.Error, outcome);
         await store.CompleteAsync(claim, decision, outcome, status, (int)watch.ElapsedMilliseconds, detail, stoppingToken);
         logger.LogInformation("Event {EventId} attempt {Attempt}: {Outcome}; delivery {Status}",
             claim.Id, claim.Attempt, outcome, decision.Status);

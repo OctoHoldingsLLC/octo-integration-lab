@@ -4,6 +4,7 @@
     <Project Path="src/Lab/Lab.csproj" />
     <Project Path="src/Partner/Partner.csproj" />
     <Project Path="src/Storage/Storage.csproj" />
+    <Project Path="src/Telemetry/Telemetry.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Lab.Tests/Lab.Tests.csproj" />

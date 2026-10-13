@@ -1,10 +1,12 @@
-# First-version verification
+# Verification record
 
 ## Expansion verification — October 12, 2026
 
-The expanded lab passed 57 backend tests against real PostgreSQL and HTTP services. Added coverage includes migration of a first-release database without changing event bytes, run idempotency and control isolation, deterministic failures, both Retry-After formats, permanent rejection, batches, independent destinations, versioned receiver state, and circuit probe concurrency and stale-result fencing.
+The expanded lab passed 64 backend tests against real PostgreSQL and HTTP services: 30 isolated contract cases and 34 integration cases. Added coverage includes migration of a first-release database without changing event bytes, legacy payload delivery and replay, run idempotency and control isolation, deterministic failures, Retry-After seconds and all three HTTP-date formats, permanent rejection, a maximum 50-order burst, independent destinations, versioned receiver state, and circuit probe concurrency and stale-result fencing. Queue metrics are checked through claims, retries, completion, replay, and run filtering. Trace IDs are checked across failed attempts and receiver observations.
 
-The committed browser suite passed 18 cases: all ten guided experiments, invalid burst feedback, ambiguous API-response recovery across reload, event links and filtering, replay, keyboard operation, connection recovery, and four viewport widths. Populated guided-run and timeline views were also checked at 320 and 1440 pixels with no detected WCAG A/AA violations. Automated accessibility checks do not replace a full manual assessment.
+The browser suite passed 20 cases: all ten guided experiments, invalid burst feedback, lost order and experiment responses across reload, event links, search, status filtering, pagination, replay, keyboard operation, connection recovery, run-scoped metrics, and four viewport widths. Populated guided-run and timeline views were also checked at 320 and 1440 pixels with no detected WCAG A/AA violations. Automated accessibility checks do not replace a full manual assessment.
+
+The optional Jaeger stack exported a single trace containing API creation, four worker delivery attempts, HTTP send spans, and both partner services. `verify-tracing.ps1` checked the actual exported parent links rather than just the presence of an ID. The real-crash script also checks that persisted trace correlation survives restarting the worker.
 
 The original verification below records the first release; it is retained as historical evidence.
 

@@ -72,6 +72,10 @@ try {
     if ($attempts[0].outcome -ne 'Interrupted' -or $attempts[-1].outcome -ne 'Duplicate') {
         throw 'Expected an interrupted attempt followed by a deduplicated retry.'
     }
+    $traceIds = @($attempts.traceId | Sort-Object -Unique)
+    if ($traceIds.Count -ne 1 -or $traceIds[0] -notmatch '^[a-f0-9]{32}$') {
+        throw 'Expected persisted trace correlation to survive the worker crash.'
+    }
     Assert-SingleEffect $crashed.eventId
     Write-Output 'PASS: a real process crash recovers its lease without repeating the business effect.'
 }

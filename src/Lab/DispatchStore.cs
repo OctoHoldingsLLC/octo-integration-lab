@@ -4,7 +4,7 @@ using NpgsqlTypes;
 namespace Octo.IntegrationLab.Lab;
 
 public sealed record DeliveryClaim(Guid Id, Guid Token, string Payload, int Attempt, int CycleAttempt,
-    Guid EventId, string Destination, Guid? RunId);
+    Guid EventId, string Destination, Guid? RunId, string? TraceParent, string? TraceState);
 
 public sealed partial class LabStore
 {
@@ -52,7 +52,7 @@ public sealed partial class LabStore
                 cycle_attempts = cycle_attempts + 1, claim_token = $1,
                 lease_until = clock_timestamp() + make_interval(secs => $2), updated_at = clock_timestamp()
             FROM candidate c, lab_events e WHERE d.id = c.id AND e.id=d.event_id
-            RETURNING d.id, e.payload, d.attempts, d.cycle_attempts, e.id, d.destination, e.run_id
+            RETURNING d.id, e.payload, d.attempts, d.cycle_attempts, e.id, d.destination, e.run_id, e.trace_parent, e.trace_state
             """, connection, transaction);
         command.Parameters.AddWithValue(claimToken);
         command.Parameters.AddWithValue(leaseSeconds);
@@ -61,7 +61,8 @@ public sealed partial class LabStore
         {
             if (!await row.ReadAsync(token)) return null;
             claim = new(row.GetGuid(0), claimToken, row.GetString(1), row.GetInt32(2), row.GetInt32(3),
-                row.GetGuid(4), row.GetString(5), row.IsDBNull(6) ? null : row.GetGuid(6));
+                row.GetGuid(4), row.GetString(5), row.IsDBNull(6) ? null : row.GetGuid(6),
+                row.IsDBNull(7) ? null : row.GetString(7), row.IsDBNull(8) ? null : row.GetString(8));
         }
         if (!await EnterCircuitAsync(connection, transaction, claim, leaseSeconds, token)) return null;
         await using var attempt = new NpgsqlCommand("""

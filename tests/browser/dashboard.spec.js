@@ -49,6 +49,11 @@ test("deep links, search, exact payload, keyboard disclosure, and replay", async
   const detail = await (await request.get(`/api/deliveries/${created.eventId}`)).json();
   await expect(page.locator("#event-payload")).toHaveText(detail.rawPayload);
   await expect(page.locator("#payload-hash")).toContainText(detail.payloadHash);
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.getByRole("button", { name: "Copy payload", exact: true }).click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(detail.rawPayload);
+  await page.getByRole("button", { name: "Copy event link", exact: true }).click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(page.url());
   await page.getByRole("button", { name: /Replay event/ }).click();
   await expect(page.locator("#timeline")).toContainText("Duplicate");
 });
@@ -61,6 +66,33 @@ test("connection failures recover and configuration retries", async ({ page }) =
   await expect(page.locator("#connection-error")).toBeHidden();
   await expect(page.locator("#delivery-policy")).toContainText("attempts per cycle");
   await expect(page.getByRole("button", { name: "Create order" })).toBeEnabled();
+});
+
+test("search, status filters, and both pagination controls navigate real deliveries", async ({ page, request }) => {
+  const prefix = `PAGING-${crypto.randomUUID().slice(0, 8)}`;
+  await request.post("/api/worker", { data: { paused: true } });
+  try {
+    for (let i = 0; i < 23; i++) {
+      const response = await request.post("/api/orders", {
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+        data: { reference: `${prefix}-${i}`, sku: "KIT-03", quantity: 1 },
+      });
+      expect(response.ok()).toBeTruthy();
+    }
+    await page.goto("/");
+    await page.getByLabel("Find an event").fill(prefix);
+    await page.getByLabel("Status", { exact: true }).selectOption("Pending");
+    await expect(page.locator("#page-status")).toContainText("Page 1 of 2 · 23 matching");
+    await page.getByRole("button", { name: "Next", exact: true }).click();
+    await expect(page.locator("#deliveries tr")).toHaveCount(3);
+    await expect(page.locator("#page-status")).toContainText("Page 2 of 2");
+    await page.getByRole("button", { name: "Previous", exact: true }).click();
+    await expect(page.locator("#deliveries tr")).toHaveCount(20);
+    await page.getByLabel("Status", { exact: true }).selectOption("Delivered");
+    await expect(page.locator("#page-status")).toContainText("0 matching");
+  } finally {
+    await request.post("/api/worker", { data: { paused: false } });
+  }
 });
 
 for (const width of [320, 390, 768, 1440]) {

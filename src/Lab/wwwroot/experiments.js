@@ -24,7 +24,11 @@ export function setExperimentBusy(value) {
   busy = value;
   document.querySelectorAll("[data-scenario]").forEach(button => button.disabled = busy);
   $("resume-run").disabled = busy;
-  $("recover-run").disabled = busy;
+  const observedFailure = current?.run.scenario === "reject"
+    ? current.steps[1].complete
+    : current?.circuits.some(circuit => circuit.history.some(entry => entry.state === "Open"));
+  $("recover-run").disabled = busy || !observedFailure;
+  $("recover-run").title = observedFailure ? "Restore this run's receiver" : "Wait for the failure evidence before restoring the receiver.";
 }
 
 export function initExperiments(handlers) {
@@ -98,11 +102,13 @@ export async function refreshExperiments() {
   $("run-scope").textContent = `Run ${run.run.id.slice(0, 8)} · ${run.run.batchSize} order${run.run.batchSize === 1 ? "" : "s"} · Controls below affect only this run. Global pause still applies to every run.`;
   $("resume-run").hidden = !run.run.paused;
   $("recover-run").hidden = !["reject", "circuit-breaker"].includes(run.run.scenario) || run.complete;
-  $("run-destinations").innerHTML = Object.entries(run.receivers).map(([name, events]) => {
+  $("run-destinations").innerHTML = Object.entries(run.receivers).sort(([a], [b]) => a.localeCompare(b)).map(([name, events]) => {
     const deliveries = run.deliveries.filter(d => d.destination === name);
+    const attempts = deliveries.reduce((sum, d) => sum + d.attempts, 0);
+    const receipts = events?.filter(e => e.received).length;
     return `<div><strong>${escape(name === "primary" ? "Partner A" : "Partner B")}</strong>
-      <span>${deliveries.filter(d => d.status === "Delivered").length}/${deliveries.length} delivered · ${deliveries.reduce((sum, d) => sum + d.attempts, 0)} attempts</span>
-      <span>${events === null ? "Receiver evidence unavailable" : `${events.filter(e => e.received).length} durable receipts`}</span></div>`;
+      <span>${deliveries.filter(d => d.status === "Delivered").length}/${deliveries.length} delivered · ${attempts} attempt${attempts === 1 ? "" : "s"}</span>
+      <span>${events === null ? "Receiver evidence unavailable" : `${receipts} durable receipt${receipts === 1 ? "" : "s"}`}</span></div>`;
   }).join("");
   $("run-circuits").innerHTML = run.circuits.map(circuit => `<div class="circuit-state"><strong>Circuit: ${escape(circuit.state)}</strong>
     <p>${circuit.state === "Open" ? "New sends are on hold. One probe will test recovery when the wait ends." : circuit.state === "HalfOpen" ? "A single recovery probe is in flight." : "The circuit allows delivery."}</p>

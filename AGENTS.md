@@ -6,6 +6,7 @@ This is a small, original reference implementation using fictional orders. Keep 
 - `src/Partner` owns simulated failures, signature verification, and deduplicated business effects.
 - `src/Contracts` owns the documented wire format, signature primitive, and retry policy.
 - `src/Storage` owns the shared transactional migration runner; each host owns its SQL migration files.
+- `src/Telemetry` owns shared trace registration; correlation must not change signed event bytes or delivery outcomes.
 - Preserve order/outbox and receipt/business-effect transaction boundaries, immutable event bytes, claim-token fencing, bounded retries, and stable IDs on replay.
 - Keep SQL parameterized. Do not add user-selected outbound URLs to this local demo.
 - No frontend build pipeline is needed. The dashboard is static HTML/CSS and JavaScript modules served by ASP.NET Core.

@@ -68,6 +68,8 @@ Run completion is derived from delivery records, failed attempts, and independen
 
 `lab_attempts` records the start, completion, outcome, HTTP status, elapsed duration, and a bounded explanatory message for each attempt. All event bytes live in `lab_events.payload` and are immutable in normal application operations. The dashboard reads global counts and searches, filters, and paginates deliveries. Detail endpoints do not depend on the current page.
 
+Queue metrics query the same durable delivery records, globally or for one run. OpenTelemetry context is stored beside event bytes and restored by each worker attempt, including after restart. HTTP instrumentation propagates the trace to the appropriate partner; attempt and observation records retain the correlation ID. Export to a local collector is optional and has no role in deciding whether a run completed. See [observability](observability.md) for metric definitions, collector setup, and the exported-trace check.
+
 An interrupted attempt has no reliable duration or HTTP status. The timeline keeps those values absent instead of inventing a failure response. Results from a stale claim are intentionally ignored.
 
 The partner's processed count is queried independently through its control API. Sender delivery and receiver processing can temporarily disagree; that is the point of the lost-acknowledgement experiment. Database snapshots and partner counters are not a distributed transaction.

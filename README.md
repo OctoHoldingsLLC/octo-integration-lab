@@ -21,7 +21,7 @@ docker compose up -d --build --wait
 
 Open **http://localhost:5188**. The first build downloads the .NET and PostgreSQL images. Subsequent starts reuse them. If the port is taken, set `LAB_PORT` in an `.env` file; see [.env.example](.env.example).
 
-Only the lab's port is published, bound to localhost. Both services run as a non-root user. Orders, event payloads, attempts, receiver receipts, and controls live in a named PostgreSQL volume and survive container restarts.
+Only the lab's port is published, bound to localhost. The lab and both partner services run as a non-root user. Orders, event payloads, attempts, receiver receipts, and controls live in a named PostgreSQL volume and survive container restarts.
 
 ## Try the experiments
 
@@ -45,9 +45,11 @@ Only the lab's port is published, bound to localhost. Both services run as a non
 
 Replay also works on delivered events, making receiver deduplication easy to inspect. It preserves the event ID, payload, and earlier attempts. Search and filter the paginated feed, or open a saved event link directly. The inspector offers both readable JSON and the exact transmitted body with its SHA-256 hash.
 
-The **On the other side** counters come from the separate partner service's durable receipt and order tables. They measure receiver-side effects, not just sender-side success responses.
+The **Partner A · all runs** counters come from that partner service's durable receipt and order tables. They measure receiver-side effects. Each run also shows results for its own destinations.
 
 Every guided experiment creates a durable run with its own events and failure behavior. The run panel marks steps complete only after checking sender and receiver records. Use the run filter to revisit earlier experiments. Manual partner controls affect manual orders to Partner A; the global worker pause affects every run. Each event timeline combines independently read sender and receiver observations, including the commit that preceded a lost acknowledgement.
+
+The **Queue health** panel shows waiting and active deliveries, oldest queued age, delivery duration, retry counts, and completions in the last minute. It follows the run filter. Optional [OpenTelemetry tracing with a local Jaeger viewer](docs/observability.md) connects order creation, retries, and both partners using the trace ID shown in the inspector.
 
 ## How it works
 

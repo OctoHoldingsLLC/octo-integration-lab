@@ -1,8 +1,10 @@
 using Npgsql;
 using Octo.IntegrationLab;
 using Octo.IntegrationLab.Partner;
+using Octo.IntegrationLab.Telemetry;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddLabTelemetry(builder.Configuration, "octo-partner-" + (builder.Configuration["PartnerName"] ?? "primary"));
 builder.WebHost.ConfigureKestrel(server => server.Limits.MaxRequestBodySize = 16 * 1024);
 var secret = builder.Configuration["SigningSecret"] ?? throw new InvalidOperationException("Set SigningSecret.");
 var controlKey = builder.Configuration["ControlKey"] ?? throw new InvalidOperationException("Set ControlKey.");

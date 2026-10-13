@@ -8,6 +8,7 @@ import {
 } from "./view.js";
 import { readSession, saveSession } from "./session.js";
 import { api } from "./api.js";
+import { renderMetrics } from "./metrics.js";
 import { initExperiments, refreshExperiments, selectedRun, setExperimentBusy } from "./experiments.js";
 
 let state = null;
@@ -59,13 +60,17 @@ async function refresh() {
   if (refreshing || document.hidden) return;
   refreshing = true;
   try {
+    const run = selectedRun();
     const results = await Promise.allSettled([
       api(`/api/state?${new URLSearchParams({ search: $("search-events").value, status: $("filter-status").value, page, pageSize: 20, ...(selectedRun() ? { runId: selectedRun() } : {}) })}`),
       api("/api/partner"),
+      api(`/api/metrics${run ? `?runId=${run}` : ""}`),
     ]);
     if (results[0].status === "rejected") throw results[0].reason;
     state = results[0].value;
     partner = results[1].status === "fulfilled" ? results[1].value : null;
+    if (results[2].status === "rejected") throw results[2].reason;
+    if (run === selectedRun()) renderMetrics(results[2].value);
     connectionError(
       partner
         ? ""

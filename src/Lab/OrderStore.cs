@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Npgsql;
@@ -52,13 +53,15 @@ public sealed partial class LabStore
         var payload = JsonSerializer.Serialize(new OrderEvent(eventId, $"order.{status}", DateTimeOffset.UtcNow,
             new(orderId, request.Reference, request.Sku, request.Quantity, status, version), runId, scenario), LabJson.Options);
         await using var outbox = new NpgsqlCommand("""
-            INSERT INTO lab_events (id, order_id, payload, run_id, version) VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO lab_events (id, order_id, payload, run_id, version, trace_parent, trace_state) VALUES ($1, $2, $3, $4, $5, $6, $7)
             """, connection, transaction);
         outbox.Parameters.AddWithValue(eventId);
         outbox.Parameters.AddWithValue(orderId);
         outbox.Parameters.AddWithValue(payload);
         outbox.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Uuid, Value = (object?)runId ?? DBNull.Value });
         outbox.Parameters.AddWithValue(version);
+        outbox.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Text, Value = (object?)Activity.Current?.Id ?? DBNull.Value });
+        outbox.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Text, Value = (object?)Activity.Current?.TraceStateString ?? DBNull.Value });
         await outbox.ExecuteNonQueryAsync(token);
         List<Guid> deliveryIds = [];
         foreach (var destination in destinations)

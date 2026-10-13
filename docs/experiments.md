@@ -1,6 +1,6 @@
 # Follow a failure through the system
 
-Start with `docker compose up -d --build --wait` and open http://localhost:5188. The dashboard starts empty on a new volume. Each guided experiment creates one fictional order and selects its event.
+Start with `docker compose up -d --build --wait` and open http://localhost:5188. The dashboard starts empty on a new volume. Each guided experiment creates a separate run with fictional orders and selects its first delivery.
 
 ## 1. Fail, then recover
 
@@ -46,7 +46,7 @@ The integration suite sends eight concurrent requests using the same API key and
 
 **Some failures need a fix** returns a permanent 422. The run completes when the delivery is exhausted after one attempt in the cycle and no business effect was committed. Replaying does not fix invalid content; it starts another one-attempt cycle.
 
-**Watch the queue drain** creates the chosen number of fictional orders in one transaction (1–50). Three workers send concurrently; a small simulated receiver delay makes the drain visible. Filter the feed to this run to follow its deliveries.
+**Watch the queue drain** creates the chosen number of fictional orders in one transaction (1–50). Three workers send concurrently; a small simulated receiver delay makes the drain visible. Filter the feed to this run to follow its deliveries and Queue health metrics. Watch Waiting decrease, In flight stay at or below three, and Completed / last 60s rise to the batch size. After delivery, compare average and 95th-percentile durations.
 
 **Let the partner breathe** starts a batch against a failing receiver. Two transient failures open the circuit for five seconds. Queued work does not spend attempts while the circuit is open. Choose **Restore this run's receiver** and watch the next HalfOpen probe close the circuit before delivery resumes. Existing in-flight calls may finish after the gate opens.
 

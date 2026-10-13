@@ -5,7 +5,9 @@ Small, understandable experiments are welcome. Open an issue describing the beha
 1. Start the stack with `docker compose up -d --build --wait`.
 2. Make your change and run `docker compose --profile test run --build --rm tests`.
 3. For delivery-lifecycle changes, run `pwsh -File scripts/verify-recovery.ps1`.
-4. Include a before/after explanation and the verification you ran in your pull request.
+4. For dashboard changes, install the browser checks with `npm ci` and `npx playwright install chromium`, then run `npm run test:browser` against that dedicated stack. Set `LAB_BASE_URL` for a custom port.
+5. For trace changes, enable the [optional collector](docs/observability.md) and run `pwsh -File scripts/verify-tracing.ps1`.
+6. Include a before/after explanation and the verification you ran in your pull request.
 
 Tests may update the lab's failure controls and create fictional orders. Use a dedicated local instance. New integration tests must verify observable behavior with real PostgreSQL and HTTP, including the failure path they introduce. Do not replace concurrency tests with in-memory database assertions.
 

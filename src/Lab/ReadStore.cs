@@ -11,7 +11,7 @@ public sealed record DeliveryView(Guid Id, Guid OrderId, string Reference, strin
 public sealed record StateView(bool Paused, long Total, long Delivered, long Queued, long Exhausted,
     List<DeliveryView> Deliveries, long Matched, int Page, int PageSize);
 public sealed record AttemptView(int Number, DateTimeOffset StartedAt, DateTimeOffset? CompletedAt,
-    string Outcome, int? HttpStatus, int? DurationMs, string? Detail);
+    string Outcome, int? HttpStatus, int? DurationMs, string? Detail, string? TraceId = null);
 public sealed record DeliveryDetail(Guid Id, JsonElement Payload, List<AttemptView> Attempts,
     string RawPayload, string PayloadHash, DeliveryView Delivery, ReceiverEvent? Receiver = null, bool ReceiverAvailable = false);
 
@@ -77,7 +77,7 @@ public sealed partial class LabStore
         using var document = JsonDocument.Parse(body);
         var payload = document.RootElement.Clone();
         await using var command = new Npgsql.NpgsqlCommand("""
-            SELECT number, started_at, completed_at, outcome, http_status, duration_ms, detail
+            SELECT number, started_at, completed_at, outcome, http_status, duration_ms, detail, trace_id
             FROM lab_attempts WHERE delivery_id = $1 ORDER BY number
             """, connection);
         command.Parameters.AddWithValue(id);
@@ -86,7 +86,7 @@ public sealed partial class LabStore
         while (await row.ReadAsync(token)) attempts.Add(new(row.GetInt32(0), row.GetFieldValue<DateTimeOffset>(1),
             row.IsDBNull(2) ? null : row.GetFieldValue<DateTimeOffset>(2), row.GetString(3),
             row.IsDBNull(4) ? null : row.GetInt32(4), row.IsDBNull(5) ? null : row.GetInt32(5),
-            row.IsDBNull(6) ? null : row.GetString(6)));
+            row.IsDBNull(6) ? null : row.GetString(6), row.IsDBNull(7) ? null : row.GetString(7)));
         await row.CloseAsync();
         await using var deliveryQuery = new Npgsql.NpgsqlCommand("""
             SELECT d.id, o.id, o.reference, o.sku, o.quantity, d.status, d.attempts, d.cycle_attempts,

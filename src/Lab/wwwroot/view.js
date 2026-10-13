@@ -92,6 +92,8 @@ export function renderDetail(detail, event, busy) {
   const version = JSON.stringify([detail, event.status, $("payload-format").value]);
   if (detailVersion === version) return;
   detailVersion = version;
+  const traces = [...new Set(detail.attempts.map(attempt => attempt.traceId).filter(Boolean))];
+  $("trace-evidence").textContent = traces.length ? `TRACE ${traces.join(" · ")} · Search this ID in the optional local trace viewer.` : "Trace correlation begins with the first delivery attempt.";
   const entries = [{ at: detail.payload.occurredAt, label: "Sender · Order and event committed",
     text: `One transaction saved the order and its ${detail.payload.type} event.`, meta: "", side: "sender" }];
   for (const attempt of detail.attempts) {

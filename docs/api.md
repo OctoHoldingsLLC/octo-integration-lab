@@ -9,6 +9,7 @@ The lab listens at `http://localhost:5188`. Use `Content-Type: application/json`
 | GET    | `/health`                          | Check the host and its database connection.                     |
 | GET    | `/api/config`                      | Retry, timeout, and lease settings; no keys.                    |
 | GET    | `/api/state`                       | Global counts, persisted pause state, filtered delivery page. |
+| GET    | `/api/metrics`                     | Durable queue and delivery metrics, optionally scoped by `runId`. |
 | POST   | `/api/orders`                      | Create an order and its outbox event atomically.                |
 | GET    | `/api/deliveries/{eventId}`        | Immutable event payload and ordered attempt history.            |
 | POST   | `/api/deliveries/{eventId}/replay` | Requeue a delivered or exhausted event.                         |
@@ -20,7 +21,9 @@ The lab listens at `http://localhost:5188`. Use `Content-Type: application/json`
 
 `GET /api/deliveries/{eventId}` also returns a self-contained `delivery` summary, `rawPayload`, and `payloadHash` (SHA-256 of the UTF-8 body). `payload` is the parsed JSON for readable display. Only `rawPayload` represents the signed bytes. An event remains inspectable when it is outside the current page or filters. Dashboard links use `?event=<UUID>`.
 
-The route parameter is a **delivery UUID**. Primary deliveries preserve the event UUID for compatibility. Secondary deliveries have their own UUID while `delivery.eventId` and `payload.id` retain the signed event UUID. Details include `receiverAvailable` and independently fetched `receiver` observations. The state endpoint also accepts `runId` to restrict its page to a specific experiment. `delivery.destination` is `primary` or `secondary`; URLs are never accepted from browser input.
+The route parameter is a **delivery UUID**. Primary deliveries preserve the event UUID for compatibility. Secondary deliveries have their own UUID while `delivery.eventId` and `payload.id` retain the signed event UUID. Details include `receiverAvailable` and independently fetched `receiver` observations. Each attempt and receiver observation exposes its `traceId` when available. The state endpoint also accepts `runId` to restrict its page to a specific experiment. `delivery.destination` is `primary` or `secondary`; URLs are never accepted from browser input.
+
+`GET /api/metrics?runId=<UUID>` returns `runId`, `queued`, `inFlight`, `oldestQueuedSeconds`, `averageDeliverySeconds`, `p95DeliverySeconds`, `currentCycleRetries`, and `completedLastMinute`. Omit `runId` for global metrics. Duration/age fields are null when there are no matching deliveries. See [metric definitions and trace setup](observability.md).
 
 ### Guided experiment endpoints
 

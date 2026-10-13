@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net.Http.Headers;
 
 namespace Octo.IntegrationLab;
 
@@ -9,9 +10,11 @@ public static class RetryAfter
     public static RetryAfterResult Parse(string? value, DateTimeOffset now)
     {
         if (string.IsNullOrWhiteSpace(value)) return new(null, "No receiver wait requested.");
+        value = value.Trim();
         double seconds;
         if (ulong.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var numeric)) seconds = numeric;
-        else if (DateTimeOffset.TryParseExact(value, "r", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var date))
+        else if (value.All(char.IsAsciiDigit)) seconds = 61; // Overflowing positive seconds still obey the explicit cap.
+        else if (RetryConditionHeaderValue.TryParse(value, out var parsed) && parsed.Date is { } date)
             seconds = Math.Max(0, (date - now).TotalSeconds);
         else return new(null, "Invalid Retry-After ignored; using local backoff.");
         // Keep this interactive local lab bounded. Make the cap explicit in the attempt record.
