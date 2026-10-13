@@ -1,5 +1,11 @@
 # Verification record
 
+## Typography verification — October 12, 2026
+
+Body text and inputs now use 16px at the default browser size, secondary text has a 14px minimum, and all text uses weight 400 or higher. Relative units respect browser font settings. Responsive layouts wrap without reducing type size.
+
+The 20-case browser suite passed. A separate computed-style audit covered 320, 390, 768, 1024, and 1440px widths, open payloads, receiver timelines, permanent failures, circuit history, hover states, disabled controls, and connection errors. The lowest sampled text contrast was 5.03:1. At 200% text size and increased line, letter, word, and paragraph spacing, the sampled layouts had no document overflow or clipped controls. Tables and payloads retain their own scroll regions. Button backgrounds change immediately to avoid low contrast during transitions between disabled and active states.
+
 ## Expansion verification â€” October 12, 2026
 
 The expanded lab passed 64 backend tests against real PostgreSQL and HTTP services: 30 isolated contract cases and 34 integration cases. Added coverage includes migration of a first-release database without changing event bytes, legacy payload delivery and replay, run idempotency and control isolation, deterministic failures, Retry-After seconds and all three HTTP-date formats, permanent rejection, a maximum 50-order burst, independent destinations, versioned receiver state, and circuit probe concurrency and stale-result fencing. Queue metrics are checked through claims, retries, completion, replay, and run filtering. Trace IDs are checked across failed attempts and receiver observations.
