@@ -8,7 +8,7 @@ The lab listens at `http://localhost:5188`. Use `Content-Type: application/json`
 | ------ | ---------------------------------- | --------------------------------------------------------------- |
 | GET    | `/health`                          | Check the host and its database connection.                     |
 | GET    | `/api/config`                      | Retry, timeout, and lease settings; no keys.                    |
-| GET    | `/api/state`                       | Counts, persisted pause state, latest 100 deliveries.           |
+| GET    | `/api/state`                       | Global counts, persisted pause state, filtered delivery page. |
 | POST   | `/api/orders`                      | Create an order and its outbox event atomically.                |
 | GET    | `/api/deliveries/{eventId}`        | Immutable event payload and ordered attempt history.            |
 | POST   | `/api/deliveries/{eventId}/replay` | Requeue a delivered or exhausted event.                         |
@@ -17,6 +17,10 @@ The lab listens at `http://localhost:5188`. Use `Content-Type: application/json`
 | POST   | `/api/partner`                     | Set `{ "mode": "healthy", "delayMs": 5000 }`.                   |
 
 ### Create an order
+
+`GET /api/state` accepts `search` (reference, delivery UUID, or SKU), `status`, `page` (one-based), and `pageSize` (1–100). Defaults remain the newest 100 deliveries. `matched`, `page`, and `pageSize` describe the filtered result; the top-level counts remain global. The dashboard uses 20 rows per page.
+
+`GET /api/deliveries/{eventId}` also returns a self-contained `delivery` summary, `rawPayload`, and `payloadHash` (SHA-256 of the UTF-8 body). `payload` is the parsed JSON for readable display. Only `rawPayload` represents the signed bytes. An event remains inspectable when it is outside the current page or filters. Dashboard links use `?event=<UUID>`.
 
 ```sh
 curl -i http://localhost:5188/api/orders \

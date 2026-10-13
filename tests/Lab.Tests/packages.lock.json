@@ -116,6 +116,13 @@
         "type": "Project",
         "dependencies": {
           "Contracts": "[1.0.0, )",
+          "Npgsql": "[10.0.3, )",
+          "Storage": "[1.0.0, )"
+        }
+      },
+      "storage": {
+        "type": "Project",
+        "dependencies": {
           "Npgsql": "[10.0.3, )"
         }
       }

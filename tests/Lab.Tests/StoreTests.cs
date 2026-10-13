@@ -31,6 +31,39 @@ public sealed class StoreTests(LabFixture fixture) : IClassFixture<LabFixture>, 
     }
 
     [Fact]
+    public async Task MigrationsAdoptExistingDataAndRejectEditedHistory()
+    {
+        var order = await store.CreateOrderAsync(Guid.NewGuid().ToString(), new("Migration survivor", "KIT-03", 1), default);
+        var before = (await store.DetailAsync(order.EventId, default))!.RawPayload;
+        await using (var legacy = source.CreateCommand("DROP TABLE schema_versions")) await legacy.ExecuteNonQueryAsync();
+        await store.InitializeAsync();
+        await store.InitializeAsync();
+        Assert.Equal(before, (await store.DetailAsync(order.EventId, default))!.RawPayload);
+        await using var corrupt = source.CreateCommand("UPDATE schema_versions SET checksum='modified' WHERE owner='lab'");
+        await corrupt.ExecuteNonQueryAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.InitializeAsync());
+    }
+
+    [Fact]
+    public async Task SearchPaginationAndDetailKeepOldEventsInspectable()
+    {
+        var first = await store.CreateOrderAsync(Guid.NewGuid().ToString(), new("Find this old order", "KIT-03", 1), default);
+        for (var i = 0; i < 105; i++)
+            await store.CreateOrderAsync(Guid.NewGuid().ToString(), new($"Newer {i}", "LAMP-01", 1), default);
+        var page = await store.StateAsync(default, page: 2, pageSize: 20);
+        Assert.Equal(106, page.Matched);
+        Assert.Equal(20, page.Deliveries.Count);
+        var found = await store.StateAsync(default, "find this", "Pending");
+        Assert.Equal(first.EventId, Assert.Single(found.Deliveries).Id);
+        var detail = (await store.DetailAsync(first.EventId, default))!;
+        Assert.Equal("Find this old order", detail.Delivery.Reference);
+        Assert.Equal(first.EventId, detail.Payload.GetProperty("id").GetGuid());
+        var expected = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(detail.RawPayload)));
+        Assert.Equal(expected, detail.PayloadHash);
+        Assert.Empty((await store.StateAsync(default, "find this", "Delivered")).Deliveries);
+    }
+
+    [Fact]
     public async Task OutboxInsertFailureRollsBackTheOrder()
     {
         await using var reject = source.CreateCommand("""

@@ -10,6 +10,12 @@
       },
       "contracts": {
         "type": "Project"
+      },
+      "storage": {
+        "type": "Project",
+        "dependencies": {
+          "Npgsql": "[10.0.3, )"
+        }
       }
     }
   }

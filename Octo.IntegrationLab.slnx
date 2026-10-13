@@ -3,6 +3,7 @@
     <Project Path="src/Contracts/Contracts.csproj" />
     <Project Path="src/Lab/Lab.csproj" />
     <Project Path="src/Partner/Partner.csproj" />
+    <Project Path="src/Storage/Storage.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Lab.Tests/Lab.Tests.csproj" />

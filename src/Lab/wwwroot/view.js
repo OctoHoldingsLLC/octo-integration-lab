@@ -44,6 +44,9 @@ export function renderState(state, selected, busy) {
   });
   $("empty").hidden = state.deliveries.length > 0;
   $("delivery-table").hidden = state.deliveries.length === 0;
+  $("page-status").textContent = `Page ${state.page} of ${Math.max(1, Math.ceil(state.matched / state.pageSize))} · ${state.matched} matching deliveries`;
+  $("previous-page").disabled = state.page <= 1;
+  $("next-page").disabled = state.page * state.pageSize >= state.matched;
   const version = JSON.stringify([state.deliveries, selected]);
   if (tableVersion === version) return;
   tableVersion = version;
@@ -86,7 +89,7 @@ export function renderDetail(detail, event, busy) {
   $("replay-event").title = ["Delivered", "Exhausted"].includes(event.status)
     ? "Requeue the same event, preserve history, and start a fresh retry budget."
     : "Wait for this delivery to finish before replaying.";
-  const version = JSON.stringify([detail, event.status]);
+  const version = JSON.stringify([detail, event.status, $("payload-format").value]);
   if (detailVersion === version) return;
   detailVersion = version;
   const start = `<li><div><strong>Order and event committed</strong><p>One transaction saved the order and its outbox event.</p><div class="attempt-meta">${escape(time(detail.payload.occurredAt))} · order.confirmed</div></div></li>`;
@@ -104,5 +107,7 @@ export function renderDetail(detail, event, busy) {
       ? `<li><div><strong>${event.status === "Pending" ? "Queued for delivery" : "Retry scheduled"}</strong><p>The event stays in PostgreSQL until the worker can claim it.${event.status === "Retrying" ? ` Next attempt due ${escape(time(event.nextAttemptAt))}.` : ""}</p></div></li>`
       : "";
   $("timeline").innerHTML = start + attempts + waiting;
-  $("event-payload").textContent = JSON.stringify(detail.payload, null, 2);
+  $("event-payload").textContent = $("payload-format").value === "raw"
+    ? detail.rawPayload : JSON.stringify(detail.payload, null, 2);
+  $("payload-hash").textContent = `SHA-256 · ${detail.payloadHash}`;
 }

@@ -55,7 +55,8 @@ app.MapGet("/health", async (NpgsqlDataSource data, CancellationToken token) =>
     await command.ExecuteScalarAsync(token);
     return Results.Ok(new { status = "healthy" });
 });
-app.MapGet("/api/state", (LabStore store, CancellationToken token) => store.StateAsync(token));
+app.MapGet("/api/state", (LabStore store, CancellationToken token, string? search, string? status, int? page, int? pageSize) =>
+    store.StateAsync(token, (search ?? "")[..Math.Min(search?.Length ?? 0, 128)], status ?? "", page ?? 1, pageSize ?? 100));
 app.MapGet("/api/config", () => new { options.MaxAttempts, options.RetryBaseSeconds, options.TimeoutSeconds, options.LeaseSeconds });
 app.MapGet("/api/deliveries/{id:guid}", async (Guid id, LabStore store, CancellationToken token) =>
     await store.DetailAsync(id, token) is { } detail ? Results.Ok(detail) : Results.NotFound(new { error = "Event not found." }));

@@ -1,0 +1,10 @@
+{
+  "name": "octo-integration-lab-checks",
+  "private": true,
+  "type": "module",
+  "scripts": { "test:browser": "playwright test" },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "@axe-core/playwright": "4.13.0"
+  }
+}

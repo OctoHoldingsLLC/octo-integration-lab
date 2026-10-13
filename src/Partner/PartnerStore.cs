@@ -2,23 +2,14 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using Npgsql;
+using Octo.IntegrationLab.Storage;
 
 namespace Octo.IntegrationLab.Partner;
 
 public sealed class PartnerStore(NpgsqlDataSource source)
 {
-    public async Task InitializeAsync()
-    {
-        await using var connection = await source.OpenConnectionAsync();
-        await using var transaction = await connection.BeginTransactionAsync();
-        await using var guard = new NpgsqlCommand("SELECT pg_advisory_xact_lock(771002)", connection, transaction);
-        await guard.ExecuteNonQueryAsync();
-        await using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("Partner.schema.sql")!;
-        using var reader = new StreamReader(stream);
-        await using var command = new NpgsqlCommand(await reader.ReadToEndAsync(), connection, transaction);
-        await command.ExecuteNonQueryAsync();
-        await transaction.CommitAsync();
-    }
+    public Task InitializeAsync() =>
+        SchemaMigrator.ApplyAsync(source, Assembly.GetExecutingAssembly(), "partner", 771002);
 
     public async Task<PartnerControl> ControlAsync(CancellationToken token)
     {

@@ -1,22 +1,13 @@
 using System.Reflection;
 using Npgsql;
+using Octo.IntegrationLab.Storage;
 
 namespace Octo.IntegrationLab.Lab;
 
 public sealed partial class LabStore(NpgsqlDataSource source)
 {
-    public async Task InitializeAsync(CancellationToken token = default)
-    {
-        await using var connection = await source.OpenConnectionAsync(token);
-        await using var transaction = await connection.BeginTransactionAsync(token);
-        await using var guard = new NpgsqlCommand("SELECT pg_advisory_xact_lock(771001)", connection, transaction);
-        await guard.ExecuteNonQueryAsync(token);
-        await using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("Lab.schema.sql")!;
-        using var reader = new StreamReader(stream);
-        await using var command = new NpgsqlCommand(await reader.ReadToEndAsync(token), connection, transaction);
-        await command.ExecuteNonQueryAsync(token);
-        await transaction.CommitAsync(token);
-    }
+    public Task InitializeAsync(CancellationToken token = default) =>
+        SchemaMigrator.ApplyAsync(source, Assembly.GetExecutingAssembly(), "lab", 771001, token);
 
     public async Task SetPausedAsync(bool paused, CancellationToken token)
     {

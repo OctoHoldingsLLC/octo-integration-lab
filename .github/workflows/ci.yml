@@ -26,6 +26,12 @@ jobs:
       - name: Verify container restart and crash recovery
         shell: pwsh
         run: ./scripts/verify-recovery.ps1
+      - name: Install browser checks
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Browser workflows and accessibility
+        run: npm run test:browser
       - name: Service logs
         if: failure()
         run: docker compose logs --no-color --tail 150

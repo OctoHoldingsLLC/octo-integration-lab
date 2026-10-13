@@ -5,3 +5,4 @@
 output
 .env
 .playwright-cli
+node_modules

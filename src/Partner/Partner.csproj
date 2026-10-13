@@ -2,6 +2,8 @@
   <ItemGroup>
     <PackageReference Include="Npgsql" Version="10.0.3" />
     <ProjectReference Include="../Contracts/Contracts.csproj" />
+    <ProjectReference Include="../Storage/Storage.csproj" />
     <EmbeddedResource Include="schema.sql" />
+    <EmbeddedResource Include="Migrations/*.sql" />
   </ItemGroup>
 </Project>

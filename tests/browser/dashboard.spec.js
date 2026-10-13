@@ -1,0 +1,76 @@
+import { test, expect } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
+
+test.beforeEach(async ({ request }) => {
+  expect((await request.post("/api/partner", { data: { mode: "healthy", delayMs: 5000 } })).ok()).toBeTruthy();
+  expect((await request.post("/api/worker", { data: { paused: false } })).ok()).toBeTruthy();
+});
+
+test("a committed order with a lost browser response is safely retried after reload", async ({ page, request }) => {
+  await page.goto("/");
+  const reference = `RELOAD-${crypto.randomUUID()}`;
+  await page.getByLabel("Order reference", { exact: true }).fill(reference);
+  let committed;
+  await page.route("**/api/orders", async (route) => {
+    const response = await route.fetch();
+    committed = await response.json();
+    await route.abort("failed");
+  }, { times: 1 });
+  await page.getByRole("button", { name: "Create order" }).click();
+  await expect(page.locator("#notice")).toHaveClass(/error/);
+  await page.reload();
+  await expect(page.getByLabel("Order reference", { exact: true })).toHaveValue(reference);
+  await page.getByRole("button", { name: "Create order" }).click();
+  await expect(page.locator("#notice")).toContainText("No additional event");
+  expect(new URL(page.url()).searchParams.get("event")).toBe(committed.eventId);
+  const state = await (await request.get(`/api/state?search=${reference}`)).json();
+  expect(state.matched).toBe(1);
+  await page.reload();
+  await expect(page.getByRole("button", { name: /Repeat last request/ })).toBeEnabled();
+});
+
+test("deep links, search, exact payload, keyboard disclosure, and replay", async ({ page, request }) => {
+  const reference = `INSPECT-${crypto.randomUUID()}`;
+  const created = await (await request.post("/api/orders", {
+    headers: { "Idempotency-Key": crypto.randomUUID() },
+    data: { reference, sku: "KIT-03", quantity: 1 },
+  })).json();
+  await page.goto(`/?event=${created.eventId}`);
+  await expect(page.locator("#detail-title")).toHaveText(reference);
+  await page.getByLabel("Find an event").fill("no-matching-events");
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(page.locator("#page-status")).toContainText("0 matching");
+  await expect(page.locator("#event-meta")).toContainText("DELIVERED");
+  const summary = page.locator("#payload-disclosure summary");
+  await summary.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#event-payload")).toBeVisible();
+  await page.getByLabel("Display", { exact: true }).selectOption("raw");
+  const detail = await (await request.get(`/api/deliveries/${created.eventId}`)).json();
+  await expect(page.locator("#event-payload")).toHaveText(detail.rawPayload);
+  await expect(page.locator("#payload-hash")).toContainText(detail.payloadHash);
+  await page.getByRole("button", { name: /Replay event/ }).click();
+  await expect(page.locator("#timeline")).toContainText("Duplicate");
+});
+
+test("connection failures recover and configuration retries", async ({ page }) => {
+  await page.route("**/api/config", (route) => route.abort(), { times: 1 });
+  await page.route("**/api/state?**", (route) => route.abort(), { times: 1 });
+  await page.goto("/");
+  await expect(page.locator("#connection-error")).toBeVisible();
+  await expect(page.locator("#connection-error")).toBeHidden();
+  await expect(page.locator("#delivery-policy")).toContainText("attempts per cycle");
+  await expect(page.getByRole("button", { name: "Create order" })).toBeEnabled();
+});
+
+for (const width of [320, 390, 768, 1440]) {
+  test(`dashboard has no horizontal overflow or detected accessibility violations at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto("/");
+    await expect(page.getByRole("button", { name: "Create order" })).toBeEnabled();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+    const report = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
+    expect(report.violations).toEqual([]);
+    await page.screenshot({ path: `output/playwright/dashboard-${width}.png`, fullPage: true });
+  });
+}

@@ -8,3 +8,4 @@ output/
 .playwright-cli/
 *.user
 *.log
+node_modules/

@@ -36,7 +36,7 @@ Only the lab's port is published, bound to localhost. Both services run as a non
 | API idempotency      | Create an order, then choose **Repeat last request**.                                             | The original order and event IDs return; total orders do not increase.                                                   |
 | Persistence          | Start **Put delivery on hold.** Run `docker compose restart lab`, refresh, and resume the worker. | The pause setting and pending event survive. Resuming delivers it.                                                       |
 
-Replay also works on delivered events, making receiver deduplication easy to inspect. It preserves the event ID, payload, and earlier attempts. The feed shows the latest 100 events; open one for its attempt timeline and signed payload.
+Replay also works on delivered events, making receiver deduplication easy to inspect. It preserves the event ID, payload, and earlier attempts. Search and filter the paginated feed, or open a saved event link directly. The inspector offers both readable JSON and the exact transmitted body with its SHA-256 hash.
 
 The **On the other side** counters come from the separate partner service's durable receipt and order tables. They measure receiver-side effects, not just sender-side success responses.
 
@@ -89,6 +89,16 @@ For local .NET development, install a .NET 10 SDK, run `dotnet build`, or run is
 dotnet test --filter Category=Unit
 ```
 
+Browser checks require Node.js for development only. Against a dedicated running stack:
+
+```sh
+npm ci
+npx playwright install chromium
+npm run test:browser
+```
+
+Set `LAB_BASE_URL` when using a different port. These tests exercise reload recovery after a lost API response, direct event links, filtering, replay, keyboard operation, and accessibility at four viewport widths. Reports and screenshots go into ignored `output/playwright/`. The dashboard itself still needs no frontend build.
+
 Use [.env.example](.env.example) and the environment entries in [compose.yaml](compose.yaml) when running the hosts directly. Integration tests require `LAB_BASE_URL`, `PARTNER_BASE_URL`, `ConnectionStrings__Lab`, and the matching `SigningSecret`; the Compose test service sets these automatically.
 
 ## Stop or reset
@@ -108,7 +118,7 @@ docker compose up -d --build --wait
 
 This is an educational reference implementation with one fictional `order.confirmed` workflow. It has no authentication, billing, real partner integrations, tenant management, or production deployment configuration. Default keys are intentionally public demo values. Keep it local and use fictional data. See [SECURITY.md](SECURITY.md) for the operating boundary.
 
-The schema is initialized on startup for this first release. Future incompatible schema changes need migrations. Delivery ordering, historical data retention, throughput guarantees, and distributed rate limiting are outside this version's scope.
+The schema is upgraded on startup using [transactional, checksummed migrations](docs/migrations.md). Existing first-release data is preserved. Delivery ordering, historical data retention, throughput guarantees, and distributed rate limiting are outside this version's scope.
 
 ## Built by Octo
 

@@ -224,9 +224,19 @@
                 ><span class="dot"></span>Connecting</span
               >
             </div>
+            <form id="event-search" class="feed-tools" role="search" aria-label="Find deliveries">
+              <label for="search-events">Find an event</label>
+              <input id="search-events" type="search" maxlength="128" placeholder="Reference, event ID, or SKU" />
+              <label for="filter-status">Status</label>
+              <select id="filter-status">
+                <option value="">All statuses</option><option>Pending</option><option>Delivering</option>
+                <option>Retrying</option><option>Delivered</option><option>Exhausted</option>
+              </select>
+              <button class="button secondary small" type="submit">Search</button>
+            </form>
             <div id="empty" class="empty">
               <span class="empty-glyph" aria-hidden="true">↗</span>
-              <h3>Ready when you are.</h3>
+              <h3>No matching deliveries.</h3>
               <p>
                 Create an order, or start a guided experiment below.<br />Your
                 events and their delivery attempts will appear here.
@@ -254,8 +264,9 @@
               </table>
             </div>
             <div class="feed-footer">
-              <span>Showing the latest 100 events</span
-              ><span>At-least-once delivery</span>
+              <button id="previous-page" class="button secondary small" type="button" disabled>Previous</button>
+              <span id="page-status">Loading deliveries…</span>
+              <button id="next-page" class="button secondary small" type="button" disabled>Next</button>
             </div>
           </section>
           <section
@@ -279,13 +290,20 @@
               </button>
             </div>
             <p class="event-meta mono" id="event-meta"></p>
+            <button type="button" class="text-button" id="copy-event-link">Copy event link</button>
             <ol class="timeline" id="timeline"></ol>
             <details id="payload-disclosure">
               <summary>
                 Inspect the signed event payload
                 <span aria-hidden="true">+</span>
               </summary>
+              <div class="feed-tools">
+                <label for="payload-format">Display</label>
+                <select id="payload-format"><option value="readable">Readable JSON</option><option value="raw">Exact transmitted body</option></select>
+                <button type="button" id="copy-payload" class="button secondary small">Copy payload</button>
+              </div>
               <pre id="event-payload"></pre>
+              <p id="payload-hash" class="event-meta mono"></p>
               <p class="payload-note">
                 The same event ID and exact payload bytes are reused on every
                 retry. Each attempt receives a fresh timestamp and signature.

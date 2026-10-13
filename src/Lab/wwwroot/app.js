@@ -6,15 +6,38 @@ import {
   renderPartner,
   renderDetail,
 } from "./view.js";
+import { readSession, saveSession } from "./session.js";
 
 let state = null;
 let partner = null;
-let selected = null;
+let selected = new URL(location.href).searchParams.get("event");
 let busy = false;
 let refreshing = false;
-let lastRequest = null;
-let pendingRequest = null;
-let referenceNumber = 1001;
+const session = readSession();
+let lastRequest = session.lastRequest || null;
+let pendingRequest = session.pendingRequest || null;
+let referenceNumber = session.referenceNumber || 1001;
+let page = 1;
+let configLoaded = false;
+
+function persist() {
+  saveSession({ lastRequest, pendingRequest, referenceNumber });
+}
+
+function selectEvent(id) {
+  selected = id;
+  const url = new URL(location.href);
+  if (id) url.searchParams.set("event", id);
+  else url.searchParams.delete("event");
+  history.replaceState(null, "", url);
+}
+
+if (pendingRequest) {
+  $("reference").value = pendingRequest.order.reference;
+  $("sku").value = pendingRequest.order.sku;
+  $("quantity").value = pendingRequest.order.quantity;
+  announce("An earlier order has an unconfirmed response. Submit it again to safely reuse its request key.");
+} else $("reference").value = `DEMO-${referenceNumber}`;
 
 async function api(path, body, headers = {}) {
   const response = await fetch(path, {
@@ -50,10 +73,9 @@ function render() {
 
 async function loadDetail() {
   const id = selected;
-  const event = state?.deliveries.find((item) => item.id === id);
-  if (!id || !event) return;
+  if (!id) return;
   const detail = await api(`/api/deliveries/${id}`);
-  if (selected === id) renderDetail(detail, event, busy);
+  if (selected === id) renderDetail(detail, detail.delivery, busy);
 }
 
 async function refresh() {
@@ -61,7 +83,7 @@ async function refresh() {
   refreshing = true;
   try {
     const results = await Promise.allSettled([
-      api("/api/state"),
+      api(`/api/state?${new URLSearchParams({ search: $("search-events").value, status: $("filter-status").value, page, pageSize: 20 })}`),
       api("/api/partner"),
     ]);
     if (results[0].status === "rejected") throw results[0].reason;
@@ -74,6 +96,7 @@ async function refresh() {
     );
     render();
     await loadDetail();
+    if (!configLoaded) await loadConfig();
   } catch (error) {
     connectionError(
       `The lab connection is unavailable. Reconnecting automatically. ${error.message}`,
@@ -109,18 +132,20 @@ async function submitOrder(order) {
     pendingRequest = { order, key: crypto.randomUUID() };
   }
   const request = pendingRequest;
+  persist();
   const result = await api("/api/orders", request.order, {
     "Idempotency-Key": request.key,
   });
   lastRequest = request;
   pendingRequest = null;
-  selected = result.eventId;
+  selectEvent(result.eventId);
   announce(
     result.reused
       ? "The same request returned the original order. No additional event was created."
       : "Order saved. Its event is safely queued for delivery.",
   );
   $("reference").value = `DEMO-${++referenceNumber}`;
+  persist();
 }
 
 $("order-form").addEventListener("submit", (event) => {
@@ -140,7 +165,7 @@ $("repeat-order").addEventListener("click", () =>
     const result = await api("/api/orders", lastRequest.order, {
       "Idempotency-Key": lastRequest.key,
     });
-    selected = result.eventId;
+    selectEvent(result.eventId);
     announce(
       "Same key, same order. The API returned the existing event without creating another.",
     );
@@ -174,7 +199,7 @@ $("pause-worker").addEventListener("click", () =>
 $("deliveries").addEventListener("click", async (event) => {
   const button = event.target.closest("[data-event]");
   if (!button) return;
-  selected = button.dataset.event;
+  selectEvent(button.dataset.event);
   render();
   try {
     await loadDetail();
@@ -220,20 +245,38 @@ document.querySelectorAll("[data-experiment]").forEach((button) => {
   );
 });
 
-async function start() {
+async function loadConfig() {
   try {
     const config = await api("/api/config");
     $("delivery-policy").textContent =
       `${config.MaxAttempts ?? config.maxAttempts} attempts per cycle · ${config.TimeoutSeconds ?? config.timeoutSeconds}s timeout · exponential backoff + jitter. Replay starts a new cycle.`;
+    configLoaded = true;
   } catch {
     $("delivery-policy").textContent =
       "Delivery settings will be available when the lab reconnects.";
   }
-  await refresh();
-  setInterval(refresh, 1000);
 }
+
+$("event-search").addEventListener("submit", (event) => {
+  event.preventDefault();
+  page = 1;
+  refresh();
+});
+$("filter-status").addEventListener("change", () => { page = 1; refresh(); });
+$("previous-page").addEventListener("click", () => { page = Math.max(1, page - 1); refresh(); });
+$("next-page").addEventListener("click", () => { page += 1; refresh(); });
+$("payload-format").addEventListener("change", loadDetail);
+$("copy-payload").addEventListener("click", () => act(async () => {
+  await navigator.clipboard.writeText($("event-payload").textContent);
+  announce("Payload copied.");
+}));
+$("copy-event-link").addEventListener("click", () => act(async () => {
+  await navigator.clipboard.writeText(location.href);
+  announce("Event link copied.");
+}));
 
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refresh();
 });
-start();
+refresh();
+setInterval(refresh, 1000);
