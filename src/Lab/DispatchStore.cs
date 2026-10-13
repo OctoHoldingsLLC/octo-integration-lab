@@ -3,7 +3,8 @@ using NpgsqlTypes;
 
 namespace Octo.IntegrationLab.Lab;
 
-public sealed record DeliveryClaim(Guid Id, Guid Token, string Payload, int Attempt, int CycleAttempt);
+public sealed record DeliveryClaim(Guid Id, Guid Token, string Payload, int Attempt, int CycleAttempt,
+    Guid EventId, string Destination, Guid? RunId);
 
 public sealed partial class LabStore
 {
@@ -35,16 +36,23 @@ public sealed partial class LabStore
         await using var transaction = await connection.BeginTransactionAsync(token);
         await using var command = new NpgsqlCommand("""
             WITH candidate AS (
-                SELECT id FROM lab_deliveries
-                WHERE status IN ('Pending','Retrying') AND next_attempt_at <= clock_timestamp()
+                SELECT d.id FROM lab_deliveries d JOIN lab_events e ON e.id=d.event_id
+                LEFT JOIN lab_runs r ON r.id=e.run_id
+                WHERE d.status IN ('Pending','Retrying') AND d.next_attempt_at <= clock_timestamp()
                     AND NOT (SELECT paused FROM lab_settings WHERE id)
-                ORDER BY next_attempt_at, created_at FOR UPDATE SKIP LOCKED LIMIT 1
+                    AND NOT COALESCE(r.paused,false)
+                    AND NOT EXISTS (
+                        SELECT 1 FROM lab_circuits c WHERE c.run_id=e.run_id AND c.destination=d.destination
+                        AND ((c.state='Open' AND c.open_until > clock_timestamp())
+                            OR (c.state='HalfOpen' AND c.probe_lease_until > clock_timestamp()))
+                    )
+                ORDER BY d.next_attempt_at, d.created_at FOR UPDATE OF d SKIP LOCKED LIMIT 1
             )
             UPDATE lab_deliveries d SET status = 'Delivering', attempts = attempts + 1,
                 cycle_attempts = cycle_attempts + 1, claim_token = $1,
                 lease_until = clock_timestamp() + make_interval(secs => $2), updated_at = clock_timestamp()
-            FROM candidate c WHERE d.id = c.id
-            RETURNING d.id, d.payload, d.attempts, d.cycle_attempts
+            FROM candidate c, lab_events e WHERE d.id = c.id AND e.id=d.event_id
+            RETURNING d.id, e.payload, d.attempts, d.cycle_attempts, e.id, d.destination, e.run_id
             """, connection, transaction);
         command.Parameters.AddWithValue(claimToken);
         command.Parameters.AddWithValue(leaseSeconds);
@@ -52,8 +60,10 @@ public sealed partial class LabStore
         await using (var row = await command.ExecuteReaderAsync(token))
         {
             if (!await row.ReadAsync(token)) return null;
-            claim = new(row.GetGuid(0), claimToken, row.GetString(1), row.GetInt32(2), row.GetInt32(3));
+            claim = new(row.GetGuid(0), claimToken, row.GetString(1), row.GetInt32(2), row.GetInt32(3),
+                row.GetGuid(4), row.GetString(5), row.IsDBNull(6) ? null : row.GetGuid(6));
         }
+        if (!await EnterCircuitAsync(connection, transaction, claim, leaseSeconds, token)) return null;
         await using var attempt = new NpgsqlCommand("""
             INSERT INTO lab_attempts (id, delivery_id, number) VALUES ($1, $2, $3)
             """, connection, transaction);
@@ -92,6 +102,7 @@ public sealed partial class LabStore
         attempt.Parameters.AddWithValue(claim.Id);
         attempt.Parameters.AddWithValue(claim.Attempt);
         await attempt.ExecuteNonQueryAsync(token);
+        await FinishCircuitAsync(connection, transaction, claim, decision, httpStatus, token);
         await transaction.CommitAsync(token);
     }
 }

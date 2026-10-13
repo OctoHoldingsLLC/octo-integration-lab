@@ -7,6 +7,8 @@ import {
   renderDetail,
 } from "./view.js";
 import { readSession, saveSession } from "./session.js";
+import { api } from "./api.js";
+import { initExperiments, refreshExperiments, selectedRun, setExperimentBusy } from "./experiments.js";
 
 let state = null;
 let partner = null;
@@ -39,36 +41,11 @@ if (pendingRequest) {
   announce("An earlier order has an unconfirmed response. Submit it again to safely reuse its request key.");
 } else $("reference").value = `DEMO-${referenceNumber}`;
 
-async function api(path, body, headers = {}) {
-  const response = await fetch(path, {
-    method: body === undefined ? "GET" : "POST",
-    headers: {
-      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-      ...headers,
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(8000),
-  });
-  const text = await response.text();
-  let result;
-  try {
-    result = text ? JSON.parse(text) : null;
-  } catch {
-    result = null;
-  }
-  if (!response.ok)
-    throw new Error(
-      result?.error ||
-        result?.title ||
-        `Request failed (HTTP ${response.status}).`,
-    );
-  return result;
-}
-
 function render() {
   if (state) renderState(state, selected, busy);
   renderPartner(partner, busy);
   $("repeat-order").disabled = busy || !lastRequest;
+  setExperimentBusy(busy);
 }
 
 async function loadDetail() {
@@ -83,7 +60,7 @@ async function refresh() {
   refreshing = true;
   try {
     const results = await Promise.allSettled([
-      api(`/api/state?${new URLSearchParams({ search: $("search-events").value, status: $("filter-status").value, page, pageSize: 20 })}`),
+      api(`/api/state?${new URLSearchParams({ search: $("search-events").value, status: $("filter-status").value, page, pageSize: 20, ...(selectedRun() ? { runId: selectedRun() } : {}) })}`),
       api("/api/partner"),
     ]);
     if (results[0].status === "rejected") throw results[0].reason;
@@ -96,6 +73,7 @@ async function refresh() {
     );
     render();
     await loadDetail();
+    await refreshExperiments();
     if (!configLoaded) await loadConfig();
   } catch (error) {
     connectionError(
@@ -217,34 +195,6 @@ $("replay-event").addEventListener("click", () =>
   }),
 );
 
-document.querySelectorAll("[data-experiment]").forEach((button) => {
-  button.addEventListener("click", () =>
-    act(async () => {
-      const experiment = button.dataset.experiment;
-      await api("/api/worker", { paused: experiment === "pause" });
-      await api("/api/partner", {
-        mode: experiment === "pause" ? "healthy" : experiment,
-        delayMs: 5000,
-      });
-      await submitOrder({
-        reference: `DEMO-${referenceNumber}`,
-        sku: "LAMP-01",
-        quantity: 1,
-      });
-      announce(
-        {
-          reject:
-            "Experiment started. Wait for a failed attempt, then choose Healthy. The scheduled retry will deliver the same event.",
-          "lost-ack":
-            "Experiment started. The partner will process the order, delay its reply, then recognize the retry as a duplicate.",
-          pause:
-            "Experiment started. The worker is paused and the event is stored in PostgreSQL. Resume the worker to deliver it. You can restart the lab container first to verify persistence.",
-        }[experiment],
-      );
-    }),
-  );
-});
-
 async function loadConfig() {
   try {
     const config = await api("/api/config");
@@ -278,5 +228,11 @@ $("copy-event-link").addEventListener("click", () => act(async () => {
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refresh();
 });
+initExperiments({ act, selectEvent, filterChanged: () => {
+  page = 1;
+  selectEvent(null);
+  $("event-detail").hidden = true;
+  refresh();
+} });
 refresh();
 setInterval(refresh, 1000);

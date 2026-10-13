@@ -43,6 +43,7 @@ services:
     environment:
       <<: *environment
       PartnerUrl: http://partner:8080
+      SecondaryPartnerUrl: http://partner-secondary:8080
       MaxAttempts: 4
       RetryBaseSeconds: 2
       TimeoutSeconds: 2
@@ -51,6 +52,25 @@ services:
       db:
         condition: service_healthy
       partner:
+        condition: service_healthy
+      partner-secondary:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, http://localhost:8080/health]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  partner-secondary:
+    build:
+      context: .
+      target: partner
+    environment:
+      <<: *environment
+      PartnerName: secondary
+      StoreSchema: partner_secondary
+    depends_on:
+      db:
         condition: service_healthy
     healthcheck:
       test: [CMD, curl, --fail, --silent, http://localhost:8080/health]

@@ -1,10 +1,10 @@
 # Architecture and guarantees
 
-The lab uses two independent ASP.NET Core hosts and one PostgreSQL instance. The hosts own separate tables; the shared instance makes local setup small. `src/Lab` never writes the partner's business records, and `src/Partner` never edits the outbox. They communicate over HTTP.
+The lab uses one sender and two independent ASP.NET Core partner hosts with one PostgreSQL instance. Partner A uses the public schema; Partner B uses partner_secondary. The hosts own separate tables; the shared instance makes local setup small. `src/Lab` never writes the partner's business records, and `src/Partner` never edits the outbox. They communicate over HTTP.
 
 ## Order creation
 
-`POST /api/orders` requires an idempotency key. Validation runs before persistence. Inside one transaction, the API inserts an order with a unique key and a hash of its normalized request, then writes an immutable `order.confirmed` JSON payload to `lab_deliveries`.
+`POST /api/orders` requires an idempotency key. Validation runs before persistence. Inside one transaction, the API inserts an order with a unique key and a hash of its normalized request, then writes an immutable `order.confirmed` JSON payload to `lab_events` and its delivery to `lab_deliveries`.
 
 The unique key serializes concurrent duplicate requests. A matching request returns the existing order and event IDs. Reusing a key with different content returns 409. If the outbox insert fails, the order insert rolls back. There is no interval in which a committed order exists without its outbox event.
 
@@ -42,21 +42,31 @@ Pausing prevents new claims. Already in-flight requests may finish. The pause fl
 | Other HTTP status, including redirects | Exhaust immediately; redirects are not followed.                |
 | Expired lease                          | Mark the unfinished attempt interrupted, then retry or exhaust. |
 
-The default cycle has four attempts. Delays after attempts 1–3 are approximately 2–2.5, 4–5, and 8–10 seconds. The policy caps delays at 60 seconds. This version does not implement `Retry-After` or per-destination rate limits.
+The default cycle has four attempts. Delays after attempts 1–3 are approximately 2–2.5, 4–5, and 8–10 seconds. The policy caps delays at 60 seconds. For 429 and 503 responses, Retry-After accepts nonnegative seconds or an HTTP date. The greater of local backoff and the receiver delay wins. Invalid values fall back to local backoff; excessive values are capped at 60 seconds with an explicit attempt explanation. Per-destination rate limits are not implemented.
 
-HTTP clients disable automatic redirects, cookies, and proxies. The target is a single operator-configured origin, never a browser-supplied URL. Only a small optional response body is read for the partner's duplicate flag; a malformed or large body cannot turn a 2xx acknowledgement into another delivery attempt. Logs include event IDs and outcomes, not request payloads or secrets.
+HTTP clients disable automatic redirects, cookies, and proxies. The two destinations are fixed operator-configured origins, never browser-supplied URLs. Only a small optional response body is read for the partner's duplicate flag; a malformed or large body cannot turn a 2xx acknowledgement into another delivery attempt. Logs include event IDs and outcomes, not request payloads or secrets.
 
 ## Receiver transaction
 
 The partner verifies the timestamped HMAC before applying a failure mode or touching a business record. It checks that the signed event ID matches the event payload and validates the fictional order fields.
 
-A unique `partner_receipts.event_id` enforces deduplication. In one transaction the partner writes both that receipt and a `partner_orders` record representing the business effect. Concurrent duplicates wait for the winning transaction, compare payload hashes, increment a diagnostic duplicate counter, and return success without repeating the effect. Conflicting content under an existing ID returns 409. A separate unique order ID prevents a new event ID from silently creating the same order again.
+A unique `partner_receipts.event_id` enforces deduplication. In one transaction the partner writes both that receipt and a `partner_orders` record representing the business effect. Concurrent duplicates wait for the winning transaction, compare payload hashes, increment a diagnostic duplicate counter, and return success without repeating the effect. Conflicting content under an existing ID returns 409. A unique order ID and conditional version update prevent duplicate or stale events from repeating or reversing the business effect.
 
 In **Lost acknowledgement**, the transaction commits before the response is delayed. The sender times out; its retry finds the receipt and succeeds as a duplicate. The signature timestamp alone does not prevent a valid message from being replayed inside its five-minute window. Durable inbox uniqueness does.
 
 ## Observability and storage
 
-`lab_attempts` records the start, completion, outcome, HTTP status, elapsed duration, and a bounded explanatory message for each attempt. All event bytes live in `lab_deliveries.payload` and are immutable in normal application operations. The dashboard reads counts from the entire dataset and lists the newest 100 events.
+Guided runs are created atomically with their orders, events, and destination deliveries. Run requests have independent idempotency keys. Signed event metadata identifies the run and scenario; the receiver uses a durable request counter for repeatable failures. A receiver override affects only that run. Manual receiver controls apply to events without a run. The global worker pause applies to both manual events and runs; a run's own pause affects only that run.
+
+The same immutable event can have one delivery per destination. Each delivery has its own lease, claim token, attempts, status, and retry budget. Partner A and Partner B have separate durable stores. The primary delivery retains the event UUID as its delivery UUID for compatibility; secondary deliveries have distinct delivery UUIDs but transmit the original signed event UUID.
+
+The ordering experiment creates a version-one confirmation and a version-two cancellation, delaying the former's initial delivery. The receiver applies a version only when it is newer than the stored order version. An older event gets a durable receipt marked Stale and a successful acknowledgement without overwriting the order. A different event reusing the same order version conflicts. Receipt, version comparison, conditional order update, and observation share a transaction.
+
+The circuit experiment adds a durable gate scoped to its run and destination. Two transient failures open it for five seconds. Already claimed requests may finish. Open gates suppress new claims without incrementing attempt counters. After the wait, a row lock admits one leased HalfOpen probe. Success closes the gate; another transient failure reopens it. An expired probe can be replaced, and the delivery's claim-token fence prevents its stale result from changing either delivery or circuit state. No network call occurs inside a database transaction.
+
+Run completion is derived from delivery records, failed attempts, and independently fetched receiver evidence. Missing receiver evidence leaves a run unverified. The permanent-rejection experiment completes by verifying exhaustion and the absence of a committed receipt. Timelines merge real sender and receiver observations by their timestamps; they are not a distributed snapshot and assume sufficiently synchronized clocks.
+
+`lab_attempts` records the start, completion, outcome, HTTP status, elapsed duration, and a bounded explanatory message for each attempt. All event bytes live in `lab_events.payload` and are immutable in normal application operations. The dashboard reads global counts and searches, filters, and paginates deliveries. Detail endpoints do not depend on the current page.
 
 An interrupted attempt has no reliable duration or HTTP status. The timeline keeps those values absent instead of inventing a failure response. Results from a stale claim are intentionally ignored.
 
@@ -64,11 +74,11 @@ The partner's processed count is queried independently through its control API. 
 
 ## Deliberate limits
 
-- One event type and one configured partner; no ordering guarantee between events.
+- Two order event versions and two fixed configured partners; no transport ordering guarantee.
 - Three concurrent requests per host, no distributed concurrency cap.
 - Shared local database server and demo credentials; no tenant boundary or production key lifecycle.
 - No pruning, encrypted payload store, metrics backend, alerting, automatic deployment, or production SLA.
-- Startup DDL initializes this version's schema; it is not a migration system.
+- Transactional migrations upgrade each service schema and refuse modified migration history.
 - Schema ownership and unrestricted demo controls are suitable for this localhost lab. A deployed service needs authentication, least-privilege database roles, and an explicit operating model.
 
 The SQL is deliberately visible in the store classes. The goal is to make transaction boundaries and failure behavior easy to inspect. See the [tests](../tests/Lab.Tests) for executable counterexamples, including rollback, claim races, final-attempt abandonment, and stale-result fencing.

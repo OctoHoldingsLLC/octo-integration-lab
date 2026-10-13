@@ -1,5 +1,5 @@
 export const $ = (id) => document.getElementById(id);
-const escape = (value) =>
+export const escape = (value) =>
   String(value).replace(
     /[&<>"']/g,
     (char) =>
@@ -55,7 +55,7 @@ export function renderState(state, selected, busy) {
     .map(
       (event) => `
     <tr class="${event.id === selected ? "selected" : ""}">
-      <td><strong>${escape(event.reference)}</strong><small>${escape(event.id.slice(0, 8))} · ${escape(event.sku)} × ${event.quantity}</small></td>
+      <td><strong>${escape(event.reference)}</strong><small>${escape(event.eventId.slice(0, 8))} · ${event.destination === "primary" ? "Partner A" : "Partner B"} · v${event.version}</small></td>
       <td><span class="status ${escape(event.status)}">${escape(event.status)}</span></td>
       <td>${event.attempts}${event.replays ? ` <span title="Replay cycles">/ ${event.replays} replay${event.replays === 1 ? "" : "s"}</span>` : ""}</td>
       <td>${escape(time(event.updatedAt))}</td>
@@ -83,7 +83,7 @@ export function renderDetail(detail, event, busy) {
   $("event-detail").hidden = false;
   $("detail-title").textContent = event.reference;
   $("event-meta").textContent =
-    `EVENT ${detail.id} · ${event.status.toUpperCase()}`;
+    `EVENT ${event.eventId} · ${event.destination === "primary" ? "PARTNER A" : "PARTNER B"} · v${event.version} · ${event.status.toUpperCase()}`;
   $("replay-event").disabled =
     busy || !["Delivered", "Exhausted"].includes(event.status);
   $("replay-event").title = ["Delivered", "Exhausted"].includes(event.status)
@@ -92,21 +92,29 @@ export function renderDetail(detail, event, busy) {
   const version = JSON.stringify([detail, event.status, $("payload-format").value]);
   if (detailVersion === version) return;
   detailVersion = version;
-  const start = `<li><div><strong>Order and event committed</strong><p>One transaction saved the order and its outbox event.</p><div class="attempt-meta">${escape(time(detail.payload.occurredAt))} · order.confirmed</div></div></li>`;
-  const attempts = detail.attempts
-    .map(
-      (attempt) => `<li><div>
-    <strong>Attempt ${attempt.number} · ${escape(attempt.outcome)}</strong>
-    <p>${escape(attempt.detail || "A signed request is on its way to the partner.")}</p>
-    <div class="attempt-meta">${escape(time(attempt.startedAt))}${attempt.durationMs !== null ? ` · ${attempt.durationMs}ms` : ""}${attempt.httpStatus !== null ? ` · HTTP ${attempt.httpStatus}` : ""}</div>
-  </div></li>`,
-    )
-    .join("");
+  const entries = [{ at: detail.payload.occurredAt, label: "Sender · Order and event committed",
+    text: `One transaction saved the order and its ${detail.payload.type} event.`, meta: "", side: "sender" }];
+  for (const attempt of detail.attempts) {
+    entries.push({ at: attempt.startedAt, label: `Sender · Attempt ${attempt.number} claimed`,
+      text: "The worker claimed this delivery and started preparing its signed request.", meta: "", side: "sender" });
+    if (attempt.completedAt) entries.push({ at: attempt.completedAt, label: `Sender · Attempt ${attempt.number} · ${attempt.outcome}`,
+      text: attempt.detail, meta: `${attempt.durationMs === null ? "" : ` · ${attempt.durationMs}ms`}${attempt.httpStatus === null ? "" : ` · HTTP ${attempt.httpStatus}`}`, side: "sender" });
+  }
+  for (const observation of detail.receiver?.observations || []) entries.push({
+    at: observation.at, label: `Receiver · ${observation.outcome}`, text: observation.detail,
+    meta: observation.httpStatus === null ? "" : ` · HTTP ${observation.httpStatus}`, side: "receiver",
+  });
+  entries.sort((a, b) => new Date(a.at) - new Date(b.at));
+  const history = entries.map(entry => `<li><div class="${entry.side}-entry"><strong>${escape(entry.label)}</strong>
+    <p>${escape(entry.text)}</p><div class="attempt-meta">${escape(time(entry.at))}${escape(entry.meta)}</div></div></li>`).join("");
+  $("receiver-evidence").textContent = detail.receiverAvailable
+    ? "Sender and receiver observations are read independently and ordered by their clocks."
+    : "Receiver evidence is unavailable. A missing acknowledgement does not prove that the order failed.";
   const waiting =
     event.status === "Pending" || event.status === "Retrying"
       ? `<li><div><strong>${event.status === "Pending" ? "Queued for delivery" : "Retry scheduled"}</strong><p>The event stays in PostgreSQL until the worker can claim it.${event.status === "Retrying" ? ` Next attempt due ${escape(time(event.nextAttemptAt))}.` : ""}</p></div></li>`
       : "";
-  $("timeline").innerHTML = start + attempts + waiting;
+  $("timeline").innerHTML = history + waiting;
   $("event-payload").textContent = $("payload-format").value === "raw"
     ? detail.rawPayload : JSON.stringify(detail.payload, null, 2);
   $("payload-hash").textContent = `SHA-256 · ${detail.payloadHash}`;

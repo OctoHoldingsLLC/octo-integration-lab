@@ -1145,6 +1145,20 @@ footer a {
   padding: 16px 24px;
   border-bottom: 1px solid var(--line);
 }
+.run-panel { margin-bottom: 24px; }
+.run-panel > p, .run-panel > ol, .run-destinations, .circuit-state { margin: 16px 24px; }
+.run-steps { list-style: none; padding: 0; display: grid; gap: 12px; line-height: 1.5; }
+.run-steps li { padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; }
+.run-steps .complete, #run-status.complete { color: var(--green); background: var(--pale); }
+#run-status { max-width: 180px; font-size: 12px; padding: 8px; border-radius: 4px; }
+.run-lesson { border-left: 3px solid var(--green); padding: 12px; line-height: 1.6; background: var(--pale); }
+.run-destinations { display: flex; flex-wrap: wrap; gap: 24px; }
+.run-destinations > div { display: grid; gap: 6px; font-size: 12px; }
+.circuit-state { padding: 12px; border: 1px solid var(--line); line-height: 1.6; }
+.circuit-state ol { padding-left: 20px; font-size: 12px; }
+.timeline .receiver-entry { border-left: 3px solid var(--green); padding-left: 12px; }
+#filter-run { flex: 1 1 250px; min-width: 0; }
+#batch-size { max-width: 100px; }
 .feed-tools input { flex: 1 1 180px; min-width: 0; }
 .feed-tools label { font-size: 12px; color: var(--muted); }
 .feed-tools select { width: auto; max-width: 100%; }

@@ -16,11 +16,32 @@ The lab listens at `http://localhost:5188`. Use `Content-Type: application/json`
 | GET    | `/api/partner`                     | Read the partner's controls, counters, and latest 100 receipts. |
 | POST   | `/api/partner`                     | Set `{ "mode": "healthy", "delayMs": 5000 }`.                   |
 
-### Create an order
-
 `GET /api/state` accepts `search` (reference, delivery UUID, or SKU), `status`, `page` (one-based), and `pageSize` (1–100). Defaults remain the newest 100 deliveries. `matched`, `page`, and `pageSize` describe the filtered result; the top-level counts remain global. The dashboard uses 20 rows per page.
 
 `GET /api/deliveries/{eventId}` also returns a self-contained `delivery` summary, `rawPayload`, and `payloadHash` (SHA-256 of the UTF-8 body). `payload` is the parsed JSON for readable display. Only `rawPayload` represents the signed bytes. An event remains inspectable when it is outside the current page or filters. Dashboard links use `?event=<UUID>`.
+
+The route parameter is a **delivery UUID**. Primary deliveries preserve the event UUID for compatibility. Secondary deliveries have their own UUID while `delivery.eventId` and `payload.id` retain the signed event UUID. Details include `receiverAvailable` and independently fetched `receiver` observations. The state endpoint also accepts `runId` to restrict its page to a specific experiment. `delivery.destination` is `primary` or `secondary`; URLs are never accepted from browser input.
+
+### Guided experiment endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/experiments` | Scenario catalog, descriptions, and lessons. |
+| POST | `/api/runs` | Atomically create a run; requires `Idempotency-Key`. |
+| GET | `/api/runs` | Latest 50 run summaries. |
+| GET | `/api/runs/{id}` | Run steps, deliveries, receiver evidence, and circuit history. |
+| POST | `/api/runs/{id}/resume` | Resume only this run. |
+| POST | `/api/runs/{id}/recover` | Restore this run's receivers and replay its exhausted deliveries. |
+
+Create a run with `{ "scenario": "fail-twice" }`. Available scenarios are `reject`, `lost-ack`, `pause`, `fail-twice`, `rate-limit`, `permanent`, `burst`, `circuit-breaker`, `out-of-order`, and `two-partners`. Only `burst` accepts an optional `batchSize` from 1–50. Repeating a matching request/key returns the same run and delivery IDs; conflicting content returns 409. The response is `{ id, reused, conflict, deliveryIds }`.
+
+Run and event links can be combined as `?run=<run UUID>&event=<delivery UUID>`. Recovery is idempotent but spans receiver HTTP calls; if one receiver is unreachable, it returns 503 and can safely be retried. Existing scheduled retries keep their due time. The global worker pause must also be off for resumed runs to deliver.
+
+Guided events add signed `runId` and `scenario` metadata and `data.version`. Version 1 is `order.confirmed` with `status: confirmed`; version 2 is `order.cancelled` with `status: cancelled`. Optional fields default compatibly for first-release messages. Receiver success can include `stale: true` when an older version was durably acknowledged without applying it.
+
+The internal partner also provides authenticated `GET /api/events/{eventId}`, `GET /api/runs/{runId}`, and `POST /api/runs/{runId}` with `{ "mode": "healthy" }` or `reject`. They require the existing control key.
+
+### Create an order
 
 ```sh
 curl -i http://localhost:5188/api/orders \

@@ -10,6 +10,7 @@ builder.Services.AddSingleton(options);
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(options.ConnectionString));
 builder.Services.AddSingleton<LabStore>();
 builder.Services.AddSingleton<PartnerClient>();
+builder.Services.AddSingleton<ExperimentService>();
 builder.Services.AddHostedService<DeliveryWorker>();
 builder.Services.AddProblemDetails();
 foreach (var name in new[] { "partner", "control" })
@@ -55,11 +56,15 @@ app.MapGet("/health", async (NpgsqlDataSource data, CancellationToken token) =>
     await command.ExecuteScalarAsync(token);
     return Results.Ok(new { status = "healthy" });
 });
-app.MapGet("/api/state", (LabStore store, CancellationToken token, string? search, string? status, int? page, int? pageSize) =>
-    store.StateAsync(token, (search ?? "")[..Math.Min(search?.Length ?? 0, 128)], status ?? "", page ?? 1, pageSize ?? 100));
+app.MapGet("/api/state", (LabStore store, CancellationToken token, string? search, string? status, int? page, int? pageSize, Guid? runId) =>
+    store.StateAsync(token, (search ?? "")[..Math.Min(search?.Length ?? 0, 128)], status ?? "", page ?? 1, pageSize ?? 100, runId));
 app.MapGet("/api/config", () => new { options.MaxAttempts, options.RetryBaseSeconds, options.TimeoutSeconds, options.LeaseSeconds });
-app.MapGet("/api/deliveries/{id:guid}", async (Guid id, LabStore store, CancellationToken token) =>
-    await store.DetailAsync(id, token) is { } detail ? Results.Ok(detail) : Results.NotFound(new { error = "Event not found." }));
+app.MapGet("/api/deliveries/{id:guid}", async (Guid id, LabStore store, PartnerClient partner, CancellationToken token) =>
+{
+    if (await store.DetailAsync(id, token) is not { } detail) return Results.NotFound(new { error = "Event not found." });
+    var receiver = await partner.EventAsync(detail.Delivery.Destination, detail.Delivery.EventId, token);
+    return Results.Ok(detail with { Receiver = receiver, ReceiverAvailable = receiver is not null });
+});
 app.MapPost("/api/orders", async (OrderRequest request, HttpRequest http, LabStore store, CancellationToken token) =>
 {
     var key = http.Headers["Idempotency-Key"].ToString();
@@ -86,6 +91,7 @@ app.MapPost("/api/partner", async (PartnerControl control, PartnerClient partner
     if (!control.IsValid) return Results.BadRequest(new { error = "Unknown mode, or delay outside 3000–15000ms." });
     return await partner.SetAsync(control, token) ? Results.Ok(control) : Results.Json(new { error = "Could not reach the partner control API." }, statusCode: 503);
 });
+app.MapExperimentEndpoints();
 app.Run();
 
 internal sealed record WorkerControl(bool Paused);

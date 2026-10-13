@@ -1,5 +1,13 @@
 # First-version verification
 
+## Expansion verification — October 12, 2026
+
+The expanded lab passed 57 backend tests against real PostgreSQL and HTTP services. Added coverage includes migration of a first-release database without changing event bytes, run idempotency and control isolation, deterministic failures, both Retry-After formats, permanent rejection, batches, independent destinations, versioned receiver state, and circuit probe concurrency and stale-result fencing.
+
+The committed browser suite passed 18 cases: all ten guided experiments, invalid burst feedback, ambiguous API-response recovery across reload, event links and filtering, replay, keyboard operation, connection recovery, and four viewport widths. Populated guided-run and timeline views were also checked at 320 and 1440 pixels with no detected WCAG A/AA violations. Automated accessibility checks do not replace a full manual assessment.
+
+The original verification below records the first release; it is retained as historical evidence.
+
 Verified locally on October 10, 2026, with Docker Desktop, .NET 10, and PostgreSQL 17.
 
 ## Automated behavior

@@ -6,7 +6,7 @@ using Octo.IntegrationLab.Storage;
 
 namespace Octo.IntegrationLab.Partner;
 
-public sealed class PartnerStore(NpgsqlDataSource source)
+public sealed partial class PartnerStore(NpgsqlDataSource source)
 {
     public Task InitializeAsync() =>
         SchemaMigrator.ApplyAsync(source, Assembly.GetExecutingAssembly(), "partner", 771002);
@@ -33,13 +33,14 @@ public sealed class PartnerStore(NpgsqlDataSource source)
         await using var connection = await source.OpenConnectionAsync(token);
         await using var transaction = await connection.BeginTransactionAsync(token);
         await using var receipt = new NpgsqlCommand("""
-            INSERT INTO partner_receipts (event_id, payload_hash, order_id, reference) VALUES ($1, $2, $3, $4)
+            INSERT INTO partner_receipts (event_id, payload_hash, order_id, reference, run_id) VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT (event_id) DO NOTHING RETURNING event_id
             """, connection, transaction);
         receipt.Parameters.AddWithValue(message.Id);
         receipt.Parameters.AddWithValue(hash);
         receipt.Parameters.AddWithValue(message.Data.Id);
         receipt.Parameters.AddWithValue(message.Data.Reference);
+        receipt.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Uuid, Value = (object?)message.RunId ?? DBNull.Value });
         if (await receipt.ExecuteScalarAsync(token) is null)
         {
             await using var duplicate = new NpgsqlCommand("""
@@ -48,22 +49,41 @@ public sealed class PartnerStore(NpgsqlDataSource source)
             duplicate.Parameters.AddWithValue(message.Id);
             duplicate.Parameters.AddWithValue(hash);
             var matched = await duplicate.ExecuteNonQueryAsync(token) == 1;
+            if (matched) await ObserveAsync(connection, transaction, message, "Duplicate", "Matching receipt found; no business effect repeated.", null, token);
             await transaction.CommitAsync(token);
             return matched ? InboxResult.Duplicate : InboxResult.Conflict;
         }
         await using var order = new NpgsqlCommand("""
-            INSERT INTO partner_orders (order_id, event_id, reference, sku, quantity) VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (order_id) DO NOTHING
+            INSERT INTO partner_orders (order_id, event_id, reference, sku, quantity, version, status) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (order_id) DO UPDATE SET event_id=EXCLUDED.event_id, reference=EXCLUDED.reference,
+                sku=EXCLUDED.sku, quantity=EXCLUDED.quantity, version=EXCLUDED.version, status=EXCLUDED.status,
+                processed_at=clock_timestamp()
+            WHERE partner_orders.version < EXCLUDED.version
             """, connection, transaction);
         order.Parameters.AddWithValue(message.Data.Id);
         order.Parameters.AddWithValue(message.Id);
         order.Parameters.AddWithValue(message.Data.Reference);
         order.Parameters.AddWithValue(message.Data.Sku);
         order.Parameters.AddWithValue(message.Data.Quantity);
-        // A different event cannot silently overwrite an existing order's side effect.
-        if (await order.ExecuteNonQueryAsync(token) != 1) return InboxResult.Conflict;
+        order.Parameters.AddWithValue(message.Data.Version);
+        order.Parameters.AddWithValue(message.Data.Status);
+        var result = InboxResult.Accepted;
+        if (await order.ExecuteNonQueryAsync(token) != 1)
+        {
+            await using var current = new NpgsqlCommand("SELECT version FROM partner_orders WHERE order_id=$1", connection, transaction);
+            current.Parameters.AddWithValue(message.Data.Id);
+            // Same-version, different-event conflicts remain errors. Older versions are safely acknowledged.
+            if ((int)(await current.ExecuteScalarAsync(token))! == message.Data.Version) return InboxResult.Conflict;
+            result = InboxResult.Stale;
+            await using var stale = new NpgsqlCommand("UPDATE partner_receipts SET effect='Stale' WHERE event_id=$1", connection, transaction);
+            stale.Parameters.AddWithValue(message.Id);
+            await stale.ExecuteNonQueryAsync(token);
+        }
+        await ObserveAsync(connection, transaction, message, result == InboxResult.Stale ? "Stale" : "Committed",
+            result == InboxResult.Stale ? "Older version recorded but not applied; newer order state preserved."
+                : $"Receipt and order version {message.Data.Version} ({message.Data.Status}) committed together.", null, token);
         await transaction.CommitAsync(token);
-        return InboxResult.Accepted;
+        return result;
     }
 
     public async Task<object> StateAsync(CancellationToken token)
@@ -95,4 +115,4 @@ public sealed class PartnerStore(NpgsqlDataSource source)
     }
 }
 
-public enum InboxResult { Accepted, Duplicate, Conflict }
+public enum InboxResult { Accepted, Duplicate, Conflict, Stale }

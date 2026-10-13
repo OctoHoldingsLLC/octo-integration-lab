@@ -10,5 +10,5 @@ export function readSession() {
 
 export function saveSession(value) {
   // Persist before sending: after an ambiguous response, reload must reuse this key.
-  sessionStorage.setItem(key, JSON.stringify(value));
+  sessionStorage.setItem(key, JSON.stringify({ ...readSession(), ...value }));
 }

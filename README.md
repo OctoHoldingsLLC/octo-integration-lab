@@ -28,17 +28,26 @@ Only the lab's port is published, bound to localhost. Both services run as a non
 | Experiment           | What to do                                                                                        | What you should see                                                                                                      |
 | -------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | Healthy delivery     | Create an order with **Healthy** selected.                                                        | One accepted delivery and one processed order.                                                                           |
-| Retry and recover    | Start **Let it fail. Then fix it.** Wait for a failed attempt, then select **Healthy**.           | A 503 followed by a successful retry of the same event.                                                                  |
+| Retry and recover    | Start **Let it fail. Then fix it.**, then choose **Restore this run's receiver**.                 | A 503 followed by a successful retry of the same event.                                                                  |
 | Lost acknowledgement | Start **The reply never arrived.**                                                                | The partner commits the order, but the sender times out. Its retry is marked **Duplicate**. Only one order is processed. |
 | Slow receiver        | Select **Slow response**, then create an order. Switch to **Healthy**.                            | Bounded timeouts, followed by recovery.                                                                                  |
 | Dropped connection   | Select **Connection drop**, then create an order.                                                 | A network failure rather than an HTTP error; the event stays eligible for retry.                                         |
 | Retry exhaustion     | Leave **Service unavailable** selected through four attempts.                                     | **Exhausted**. Select **Healthy**, open the event, and choose **Replay event** to start a fresh cycle.                   |
 | API idempotency      | Create an order, then choose **Repeat last request**.                                             | The original order and event IDs return; total orders do not increase.                                                   |
-| Persistence          | Start **Put delivery on hold.** Run `docker compose restart lab`, refresh, and resume the worker. | The pause setting and pending event survive. Resuming delivers it.                                                       |
+| Persistence          | Start **Put delivery on hold.** Restart the lab, refresh, and choose **Resume this run**.         | The run's pause setting and pending event survive.                                                                       |
+| Repeatable recovery  | Start **Third time arrives.**                                                                    | Two 503s, then success without timing any clicks.                                                                        |
+| Rate limiting        | Start **Give the receiver time.**                                                                | Numeric and HTTP-date Retry-After values delay the next attempts.                                                       |
+| Permanent rejection  | Start **Some failures need a fix.**                                                              | A 422 exhausts the delivery immediately without creating a receiver order.                                               |
+| Burst                | Set a burst size from 1–50, then start **Watch the queue drain.**                                 | Three workers drain a durable batch.                                                                                    |
+| Circuit breaker      | Start **Let the partner breathe.**, wait for Open, then restore that run.                         | New attempts pause; one recovery probe succeeds before the queue drains.                                                 |
+| Out-of-order events  | Start **Cancellation arrives first.**                                                            | Version two arrives first; the older confirmation is acknowledged without undoing cancellation.                         |
+| Two destinations     | Start **One event, two destinations.**                                                           | Partner A succeeds immediately; Partner B fails twice and independently recovers.                                        |
 
 Replay also works on delivered events, making receiver deduplication easy to inspect. It preserves the event ID, payload, and earlier attempts. Search and filter the paginated feed, or open a saved event link directly. The inspector offers both readable JSON and the exact transmitted body with its SHA-256 hash.
 
 The **On the other side** counters come from the separate partner service's durable receipt and order tables. They measure receiver-side effects, not just sender-side success responses.
+
+Every guided experiment creates a durable run with its own events and failure behavior. The run panel marks steps complete only after checking sender and receiver records. Use the run filter to revisit earlier experiments. Manual partner controls affect manual orders to Partner A; the global worker pause affects every run. Each event timeline combines independently read sender and receiver observations, including the commit that preceded a lost acknowledgement.
 
 ## How it works
 
@@ -57,7 +66,7 @@ flowchart LR
 - **Durable scheduling:** three worker loops claim due events with `FOR UPDATE SKIP LOCKED`. Network calls happen outside the transaction.
 - **Crash recovery:** an expiring lease makes abandoned work claimable again. A claim token prevents a stale worker from overwriting a newer result.
 - **Bounded retries:** four attempts per cycle, a two-second request timeout, and exponential backoff with jitter. Transient errors retry; permanent HTTP errors exhaust immediately.
-- **Stable messages:** the event ID and stored JSON stay unchanged across retries and manual replay. Each request gets a fresh timestamp and HMAC-SHA256 signature.
+- **Stable messages:** events are stored separately from per-destination deliveries. The signed event ID and stored JSON stay unchanged across destinations, retries, and manual replay. Each request gets a fresh timestamp and HMAC-SHA256 signature.
 - **Durable deduplication:** the partner commits its receipt and fictional business effect together. Duplicate events with matching content are acknowledged without processing the order again.
 - **Inspectable failures:** failed, timed-out, interrupted, accepted, and duplicate attempts appear in the timeline. An interrupted attempt is explicitly an unknown outcome.
 
@@ -116,9 +125,9 @@ docker compose up -d --build --wait
 
 ## Scope
 
-This is an educational reference implementation with one fictional `order.confirmed` workflow. It has no authentication, billing, real partner integrations, tenant management, or production deployment configuration. Default keys are intentionally public demo values. Keep it local and use fictional data. See [SECURITY.md](SECURITY.md) for the operating boundary.
+This is an educational reference implementation with fictional order confirmation and cancellation events and two simulated partners. It has no authentication, billing, real partner integrations, tenant management, or production deployment configuration. Default keys are intentionally public demo values. Keep it local and use fictional data. See [SECURITY.md](SECURITY.md) for the operating boundary.
 
-The schema is upgraded on startup using [transactional, checksummed migrations](docs/migrations.md). Existing first-release data is preserved. Delivery ordering, historical data retention, throughput guarantees, and distributed rate limiting are outside this version's scope.
+The schema is upgraded on startup using [transactional, checksummed migrations](docs/migrations.md). Existing first-release data is preserved. The ordering experiment uses receiver-side version checks; it does not guarantee transport ordering. Historical data retention, throughput guarantees, and distributed rate limiting are outside this version's scope.
 
 ## Built by Octo
 

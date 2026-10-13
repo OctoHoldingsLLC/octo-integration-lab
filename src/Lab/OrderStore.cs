@@ -30,8 +30,8 @@ public sealed partial class LabStore
         {
             // The unique key waits for concurrent inserts; this new statement sees their committed event too.
             await using var existing = new NpgsqlCommand("""
-                SELECT o.id, d.id, o.request_hash FROM lab_orders o
-                JOIN lab_deliveries d ON d.order_id = o.id WHERE o.request_key = $1
+                SELECT o.id, e.id, o.request_hash FROM lab_orders o
+                JOIN lab_events e ON e.order_id = o.id AND e.version=1 WHERE o.request_key = $1
                 """, connection, transaction);
             existing.Parameters.AddWithValue(requestKey);
             await using var row = await existing.ExecuteReaderAsync(token);
@@ -39,16 +39,43 @@ public sealed partial class LabStore
             return new(row.GetGuid(0), row.GetGuid(1), true, row.GetString(2) != hash);
         }
 
-        var payload = JsonSerializer.Serialize(new OrderEvent(eventId, "order.confirmed", DateTimeOffset.UtcNow,
-            new(orderId, request.Reference, request.Sku, request.Quantity, "confirmed")), LabJson.Options);
+        await InsertEventAsync(connection, transaction, eventId, orderId, request, null, null, 1, ["primary"], token);
+        await transaction.CommitAsync(token);
+        return new(orderId, eventId, false, false);
+    }
+
+    private static async Task<List<Guid>> InsertEventAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        Guid eventId, Guid orderId, OrderRequest request, Guid? runId, string? scenario, int version,
+        string[] destinations, CancellationToken token)
+    {
+        var status = version == 1 ? "confirmed" : "cancelled";
+        var payload = JsonSerializer.Serialize(new OrderEvent(eventId, $"order.{status}", DateTimeOffset.UtcNow,
+            new(orderId, request.Reference, request.Sku, request.Quantity, status, version), runId, scenario), LabJson.Options);
         await using var outbox = new NpgsqlCommand("""
-            INSERT INTO lab_deliveries (id, order_id, payload) VALUES ($1, $2, $3)
+            INSERT INTO lab_events (id, order_id, payload, run_id, version) VALUES ($1, $2, $3, $4, $5)
             """, connection, transaction);
         outbox.Parameters.AddWithValue(eventId);
         outbox.Parameters.AddWithValue(orderId);
         outbox.Parameters.AddWithValue(payload);
+        outbox.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Uuid, Value = (object?)runId ?? DBNull.Value });
+        outbox.Parameters.AddWithValue(version);
         await outbox.ExecuteNonQueryAsync(token);
-        await transaction.CommitAsync(token);
-        return new(orderId, eventId, false, false);
+        List<Guid> deliveryIds = [];
+        foreach (var destination in destinations)
+        {
+            var deliveryId = destination == "primary" ? eventId : Guid.NewGuid();
+            await using var delivery = new NpgsqlCommand("""
+                INSERT INTO lab_deliveries(id,order_id,event_id,destination,next_attempt_at)
+                VALUES($1,$2,$3,$4,clock_timestamp()+make_interval(secs=>$5))
+                """, connection, transaction);
+            delivery.Parameters.AddWithValue(deliveryId);
+            delivery.Parameters.AddWithValue(orderId);
+            delivery.Parameters.AddWithValue(eventId);
+            delivery.Parameters.AddWithValue(destination);
+            delivery.Parameters.AddWithValue(scenario == "out-of-order" && version == 1 ? 3 : 0);
+            await delivery.ExecuteNonQueryAsync(token);
+            deliveryIds.Add(deliveryId);
+        }
+        return deliveryIds;
     }
 }

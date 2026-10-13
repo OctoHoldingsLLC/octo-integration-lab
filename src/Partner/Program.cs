@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Npgsql;
 using Octo.IntegrationLab;
 using Octo.IntegrationLab.Partner;
@@ -8,8 +7,18 @@ builder.WebHost.ConfigureKestrel(server => server.Limits.MaxRequestBodySize = 16
 var secret = builder.Configuration["SigningSecret"] ?? throw new InvalidOperationException("Set SigningSecret.");
 var controlKey = builder.Configuration["ControlKey"] ?? throw new InvalidOperationException("Set ControlKey.");
 if (secret.Length < 32 || controlKey.Length < 32) throw new InvalidOperationException("Use secrets of at least 32 characters.");
-builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(builder.Configuration.GetConnectionString("Lab")
-    ?? throw new InvalidOperationException("Set ConnectionStrings__Lab.")));
+var connectionString = builder.Configuration.GetConnectionString("Lab") ?? throw new InvalidOperationException("Set ConnectionStrings__Lab.");
+var schema = builder.Configuration["StoreSchema"] ?? "public";
+if (schema is not ("public" or "partner_secondary")) throw new InvalidOperationException("Unknown partner schema.");
+if (schema == "partner_secondary")
+{
+    await using var setup = NpgsqlDataSource.Create(connectionString);
+    await using var create = setup.CreateCommand("CREATE SCHEMA IF NOT EXISTS partner_secondary");
+    await create.ExecuteNonQueryAsync();
+}
+var dataOptions = new NpgsqlConnectionStringBuilder(connectionString) { SearchPath = schema };
+builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(dataOptions.ConnectionString));
+builder.Services.AddSingleton(new PartnerRuntime(secret, builder.Configuration["PartnerName"] ?? "primary"));
 builder.Services.AddSingleton<PartnerStore>();
 builder.Services.AddProblemDetails();
 var app = builder.Build();
@@ -40,48 +49,19 @@ app.MapGet("/health", async (NpgsqlDataSource data, CancellationToken token) =>
     return Results.Ok(new { status = "healthy" });
 });
 app.MapGet("/api/control", (PartnerStore store, CancellationToken token) => store.StateAsync(token));
+app.MapGet("/api/events/{id:guid}", (Guid id, PartnerStore store, CancellationToken token) => store.EventAsync(id, token));
+app.MapGet("/api/runs/{id:guid}", (Guid id, PartnerStore store, CancellationToken token) => store.RunAsync(id, token));
+app.MapPost("/api/runs/{id:guid}", async (Guid id, RunControl control, PartnerStore store, CancellationToken token) =>
+{
+    if (control.Mode is not ("healthy" or "reject")) return Results.BadRequest();
+    await store.SetRunModeAsync(id, control.Mode, token);
+    return Results.Ok(control);
+});
 app.MapPost("/api/control", async (PartnerControl control, PartnerStore store, CancellationToken token) =>
 {
     if (!control.IsValid) return Results.BadRequest(new { error = "Invalid partner mode or delay." });
     await store.SetControlAsync(control, token);
     return Results.Ok(control);
 });
-app.MapPost("/webhooks/orders", async (HttpContext context, PartnerStore store) =>
-{
-    if (!context.Request.HasJsonContentType()) return Results.StatusCode(415);
-    using var reader = new StreamReader(context.Request.Body);
-    var body = await reader.ReadToEndAsync(context.RequestAborted);
-    var eventId = context.Request.Headers[WebhookSignature.IdHeader].ToString();
-    if (!WebhookSignature.Verify(secret, context.Request.Headers[WebhookSignature.TimestampHeader].ToString(),
-        eventId, body, context.Request.Headers[WebhookSignature.SignatureHeader].ToString(), DateTimeOffset.UtcNow))
-        return Results.Json(new { error = "Invalid or expired signature." }, statusCode: 401);
-    OrderEvent? message;
-    try { message = JsonSerializer.Deserialize<OrderEvent>(body, LabJson.Options); }
-    catch (JsonException) { return Results.BadRequest(new { error = "Invalid event JSON." }); }
-    if (message is null || message.Id.ToString() != eventId || message.Type != "order.confirmed"
-        || message.Data is null || message.Data.Id == Guid.Empty || message.Data.Status != "confirmed"
-        || string.IsNullOrWhiteSpace(message.Data.Reference) || message.Data.Reference.Length > 80
-        || message.Data.Sku is not ("LAMP-01" or "DESK-02" or "KIT-03") || message.Data.Quantity is < 1 or > 100)
-        return Results.BadRequest(new { error = "Invalid order event." });
-    var control = await store.ControlAsync(context.RequestAborted);
-    if (control.Mode == "reject") return Results.Json(new { error = "Simulated partner outage." }, statusCode: 503);
-    if (control.Mode == "offline")
-    {
-        context.Abort();
-        return Results.Empty;
-    }
-    if (control.Mode == "slow")
-    {
-        try { await Task.Delay(control.DelayMs, context.RequestAborted); }
-        catch (OperationCanceledException) { return Results.StatusCode(499); }
-    }
-    var result = await store.AcceptAsync(message, body, context.RequestAborted);
-    if (result == InboxResult.Conflict) return Results.Conflict(new { error = "An event or order identifier was reused with different content." });
-    if (control.Mode == "lost-ack" && result == InboxResult.Accepted)
-    {
-        // Deliberately finish the side effect before delaying the response beyond the sender's timeout.
-        await Task.Delay(control.DelayMs, CancellationToken.None);
-    }
-    return Results.Ok(new ReceiptResult(message.Id, result == InboxResult.Duplicate));
-});
+app.MapPost("/webhooks/orders", WebhookEndpoint.HandleAsync);
 app.Run();

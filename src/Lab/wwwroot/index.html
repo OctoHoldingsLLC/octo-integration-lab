@@ -45,8 +45,8 @@
           </p>
         </div>
         <aside class="intro-note">
-          <span class="note-number">01—05</span>
-          <p>Five partner behaviors.<br />One durable workflow.</p>
+          <span class="note-number">01—10</span>
+          <p>Ten guided experiments.<br />Evidence at every step.</p>
           <span class="mono">.NET · PostgreSQL · HMAC</span>
         </aside>
       </section>
@@ -96,7 +96,7 @@
               <span class="small-label">LIVE</span>
             </div>
             <fieldset id="partner-controls" disabled>
-              <legend>Partner behavior</legend>
+              <legend>Partner A · manual orders</legend>
               <label class="mode"
                 ><input type="radio" name="mode" value="healthy" checked /><span
                   ><strong>Healthy</strong
@@ -206,6 +206,20 @@
           </p>
         </aside>
         <div class="results">
+          <section class="panel run-panel" id="run-panel" aria-labelledby="run-title" hidden>
+            <div class="panel-heading"><div><p class="eyebrow">GUIDED EXPERIMENT</p><h2 id="run-title"></h2></div>
+              <span id="run-status" role="status"></span></div>
+            <p id="run-scope" class="muted"></p>
+            <ol id="run-steps" class="run-steps"></ol>
+            <div id="run-destinations" class="run-destinations"></div>
+            <div id="run-circuits"></div>
+            <p id="run-lesson" class="run-lesson"></p>
+            <div class="feed-tools">
+              <button class="button primary" id="resume-run" type="button" hidden>Resume this run</button>
+              <button class="button primary" id="recover-run" type="button" hidden>Restore this run's receiver</button>
+              <button class="button secondary" id="clear-run" type="button">Show all deliveries</button>
+            </div>
+          </section>
           <div class="metrics" aria-label="Delivery totals">
             <div><span>Total orders</span><strong id="total">—</strong></div>
             <div><span>Delivered</span><strong id="delivered">—</strong></div>
@@ -225,6 +239,8 @@
               >
             </div>
             <form id="event-search" class="feed-tools" role="search" aria-label="Find deliveries">
+              <label for="filter-run">Experiment run</label>
+              <select id="filter-run"><option value="">All runs and manual orders</option></select>
               <label for="search-events">Find an event</label>
               <input id="search-events" type="search" maxlength="128" placeholder="Reference, event ID, or SKU" />
               <label for="filter-status">Status</label>
@@ -291,6 +307,7 @@
             </div>
             <p class="event-meta mono" id="event-meta"></p>
             <button type="button" class="text-button" id="copy-event-link">Copy event link</button>
+            <p id="receiver-evidence" class="event-meta"></p>
             <ol class="timeline" id="timeline"></ol>
             <details id="payload-disclosure">
               <summary>
@@ -315,48 +332,8 @@
               <h2 id="experiments-title">Make it interesting</h2>
               <span>GUIDED EXPERIMENTS</span>
             </div>
-            <div class="experiment-grid">
-              <button
-                class="experiment"
-                type="button"
-                data-experiment="reject"
-                disabled
-              >
-                <span class="experiment-number">01 / RETRY & RECOVER</span
-                ><strong>Let it fail. Then fix it.</strong
-                ><span
-                  >Send into a 503. Switch to Healthy and watch the next retry
-                  land.</span
-                ><span class="experiment-link">Start experiment ↗</span>
-              </button>
-              <button
-                class="experiment"
-                type="button"
-                data-experiment="lost-ack"
-                disabled
-              >
-                <span class="experiment-number">02 / THE AMBIGUOUS SUCCESS</span
-                ><strong>The reply never arrived.</strong
-                ><span
-                  >Process an order, lose the reply, and watch deduplication
-                  protect it.</span
-                ><span class="experiment-link">Start experiment ↗</span>
-              </button>
-              <button
-                class="experiment"
-                type="button"
-                data-experiment="pause"
-                disabled
-              >
-                <span class="experiment-number">03 / DURABLE BY DESIGN</span
-                ><strong>Put delivery on hold.</strong
-                ><span
-                  >Pause the worker and queue an order. Resume when you're
-                  ready.</span
-                ><span class="experiment-link">Start experiment ↗</span>
-              </button>
-            </div>
-          </section>
+            <p class="muted">Each experiment creates a separate run with its own failure behavior.</p><div class="feed-tools"><label for="batch-size">Burst size</label><input id="batch-size" type="number" min="1" max="50" value="20" /></div><div class="experiment-grid" id="experiment-catalog"></div>
+</section>
           <section class="receiver-strip" aria-label="Partner results">
             <div>
               <span class="receiver-icon" aria-hidden="true">◎</span>

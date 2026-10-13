@@ -35,13 +35,53 @@ public sealed class StoreTests(LabFixture fixture) : IClassFixture<LabFixture>, 
     {
         var order = await store.CreateOrderAsync(Guid.NewGuid().ToString(), new("Migration survivor", "KIT-03", 1), default);
         var before = (await store.DetailAsync(order.EventId, default))!.RawPayload;
-        await using (var legacy = source.CreateCommand("DROP TABLE schema_versions")) await legacy.ExecuteNonQueryAsync();
         await store.InitializeAsync();
         await store.InitializeAsync();
         Assert.Equal(before, (await store.DetailAsync(order.EventId, default))!.RawPayload);
         await using var corrupt = source.CreateCommand("UPDATE schema_versions SET checksum='modified' WHERE owner='lab'");
         await corrupt.ExecuteNonQueryAsync();
         await Assert.ThrowsAsync<InvalidOperationException>(() => store.InitializeAsync());
+    }
+
+    [Fact]
+    public async Task FirstReleaseDatabaseMigratesWithoutChangingEventBytes()
+    {
+        var legacySchema = "legacy_" + Guid.NewGuid().ToString("N");
+        await using var admin = NpgsqlDataSource.Create(fixture.ConnectionString);
+        await using (var create = admin.CreateCommand($"CREATE SCHEMA {legacySchema}")) await create.ExecuteNonQueryAsync();
+        try
+        {
+            var configuration = new NpgsqlConnectionStringBuilder(fixture.ConnectionString) { SearchPath = legacySchema };
+            await using var legacy = NpgsqlDataSource.Create(configuration.ConnectionString);
+            await using var stream = typeof(LabStore).Assembly.GetManifestResourceStream("Lab.schema.sql")!;
+            using var reader = new StreamReader(stream);
+            await using (var baseline = legacy.CreateCommand(await reader.ReadToEndAsync())) await baseline.ExecuteNonQueryAsync();
+            var id = Guid.NewGuid();
+            const string payload = "{ \"legacy\": true }";
+            await using (var order = legacy.CreateCommand("INSERT INTO lab_orders(id,request_key,request_hash,reference,sku,quantity) VALUES($1,'legacy-key','hash','Legacy','LAMP-01',1)"))
+            {
+                order.Parameters.AddWithValue(id);
+                await order.ExecuteNonQueryAsync();
+            }
+            await using (var delivery = legacy.CreateCommand("INSERT INTO lab_deliveries(id,order_id,payload) VALUES($1,$1,$2)"))
+            {
+                delivery.Parameters.AddWithValue(id);
+                delivery.Parameters.AddWithValue(payload);
+                await delivery.ExecuteNonQueryAsync();
+            }
+            var migrated = new LabStore(legacy);
+            await migrated.InitializeAsync();
+            await migrated.InitializeAsync();
+            var detail = (await migrated.DetailAsync(id, default))!;
+            Assert.Equal(payload, detail.RawPayload);
+            Assert.Equal(id, detail.Delivery.EventId);
+            Assert.Equal("primary", detail.Delivery.Destination);
+        }
+        finally
+        {
+            await using var drop = admin.CreateCommand($"DROP SCHEMA {legacySchema} CASCADE");
+            await drop.ExecuteNonQueryAsync();
+        }
     }
 
     [Fact]
@@ -61,6 +101,31 @@ public sealed class StoreTests(LabFixture fixture) : IClassFixture<LabFixture>, 
         var expected = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(detail.RawPayload)));
         Assert.Equal(expected, detail.PayloadHash);
         Assert.Empty((await store.StateAsync(default, "find this", "Delivered")).Deliveries);
+    }
+
+    [Fact]
+    public async Task CircuitAllowsOneProbeAndRecoversAnAbandonedProbeWithFencing()
+    {
+        var run = await store.CreateRunAsync(Guid.NewGuid().ToString(), new("circuit-breaker"), default);
+        for (var i = 0; i < 2; i++)
+        {
+            var claim = (await store.ClaimAsync(15, default))!;
+            await store.CompleteAsync(claim, new("Retrying", TimeSpan.FromSeconds(2)), "Failed", 503, 1, "Outage", default);
+        }
+        Assert.Null(await store.ClaimAsync(15, default));
+        Assert.Equal(2, (await store.StateAsync(default, runId: run.Id)).Deliveries.Sum(d => d.Attempts));
+        await using (var advance = source.CreateCommand("UPDATE lab_circuits SET open_until=clock_timestamp()-interval '1 second'"))
+            await advance.ExecuteNonQueryAsync();
+        var claims = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => store.ClaimAsync(15, default)));
+        var oldProbe = Assert.Single(claims, c => c is not null)!;
+        await using (var expire = source.CreateCommand("UPDATE lab_deliveries SET lease_until=clock_timestamp()-interval '1 second' WHERE status='Delivering'; UPDATE lab_circuits SET probe_lease_until=clock_timestamp()-interval '1 second'"))
+            await expire.ExecuteNonQueryAsync();
+        await store.RecoverExpiredAsync(4, default);
+        var newProbe = (await store.ClaimAsync(15, default))!;
+        await store.CompleteAsync(oldProbe, new("Delivered", null), "Accepted", 200, 1, "Stale probe", default);
+        Assert.Equal("HalfOpen", Assert.Single(await store.CircuitsAsync(run.Id, default)).State);
+        await store.CompleteAsync(newProbe, new("Delivered", null), "Accepted", 200, 1, "Current probe", default);
+        Assert.Equal("Closed", Assert.Single(await store.CircuitsAsync(run.Id, default)).State);
     }
 
     [Fact]
